@@ -71,6 +71,7 @@
               <button class="quick-link" type="button" data-quick-nav="bible">Read</button>
               <button class="quick-link" type="button" data-quick-nav="notes">Journal</button>
               <button class="quick-link" type="button" data-quick-nav="prayer">Prayer</button>
+              <button id="adminPortalBtn" class="quick-link is-hidden" type="button" data-admin-only data-main-route-only>Admin Portal</button>
             </div>
             <button id="logoutBtn" class="small-btn" type="button">Log Out</button>
           </div>
@@ -108,11 +109,11 @@
           <button class="tab is-active" data-tab="dashboard">Dashboard</button>
           <button class="tab" data-tab="plan">Reading Plan</button>
           <button class="tab" data-tab="bible">Bible</button>
+          <button class="tab" data-tab="bookmarks">Bookmarks</button>
           <button class="tab" data-tab="explorer">Verse Explorer</button>
           <button class="tab" data-tab="notes">Notes</button>
           <button class="tab" data-tab="reflection">Reflection</button>
           <button class="tab" data-tab="prayer">Prayer</button>
-          <button class="tab is-hidden" data-tab="admin" data-admin-only>Admin</button>
         </nav>
 
         <main>
@@ -199,6 +200,14 @@
             </div>
           </section>
 
+          <section id="panel-bookmarks" class="panel reveal" data-panel>
+            <div class="card">
+              <h2>Bookmarked</h2>
+              <p class="meta">Open any saved verse or chapter in Bible Reader, or remove it from your list.</p>
+              <div id="bookmarksPanelList" class="stack"></div>
+            </div>
+          </section>
+
           <section id="panel-explorer" class="panel reveal" data-panel>
             <div class="card">
               <h2>Verse Explorer</h2>
@@ -274,49 +283,6 @@
             </div>
           </section>
 
-          <section id="panel-admin" class="panel reveal is-hidden" data-panel data-admin-only>
-            <div class="grid two-up">
-              <article class="card">
-                <h2>Admin Overview</h2>
-                <p id="adminTotalUsers" class="meta">Total users: 0</p>
-                <p id="adminTotalAdmins" class="meta">Admins: 0</p>
-                <p id="adminTotalPrayers" class="meta">Prayer requests: 0</p>
-                <p id="adminTotalAnnouncements" class="meta">Announcements: 0</p>
-                <button id="refreshAdminBtn" class="small-btn" type="button">Refresh</button>
-              </article>
-              <article class="card">
-                <h2>Account Help</h2>
-                <p class="meta">Only admins can access this tab.</p>
-                <p class="meta">Promote or demote users, manage prayer requests, and publish announcements.</p>
-              </article>
-            </div>
-
-            <div class="grid two-up">
-              <form id="announcementForm" class="card stack" autocomplete="off">
-                <h2>Post Announcement</h2>
-                <label for="announcementTitle" class="label">Title</label>
-                <input id="announcementTitle" required maxlength="90" placeholder="New reading challenge this week" />
-                <label for="announcementBody" class="label">Message</label>
-                <textarea id="announcementBody" required rows="4" maxlength="500" placeholder="Share updates, encouragement, or ministry news..."></textarea>
-                <button class="btn" type="submit">Publish</button>
-              </form>
-              <div class="card">
-                <h2>Published Announcements</h2>
-                <div id="adminAnnouncementsList" class="stack"></div>
-              </div>
-            </div>
-
-            <div class="card">
-              <h2>Prayer Request Management</h2>
-              <div id="adminPrayerRequests" class="stack"></div>
-            </div>
-
-            <div class="card">
-              <h2>User Management</h2>
-              <p id="adminNotice" class="meta"></p>
-              <div id="adminUsersList" class="stack"></div>
-            </div>
-          </section>
         </main>
       </div>
       <aside class="app-rail">

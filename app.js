@@ -3,6 +3,12 @@ const SESSION_STORAGE_KEY = "pathlight-bible-session-v1";
 const APP_STATE_PREFIX = "pathlight-bible-state-v1:";
 const ANNOUNCEMENTS_STORAGE_KEY = "pathlight-bible-announcements-v1";
 const GUEST_USER_ID = "guest-local";
+const INDEX_ROUTE = "index.html";
+const ADMIN_ROUTE = "admin.html";
+const isAdminRoute = window.location.pathname.endsWith(`/${ADMIN_ROUTE}`) || window.location.pathname.endsWith(ADMIN_ROUTE);
+const BOOK_ALIASES = {
+  Psalm: "Psalms"
+};
 
 const readingPlan = [
   { id: 1, day: 1, reference: "Psalm 1", theme: "Delight in God's Word", prompt: "What fruit comes from meditating on Scripture?" },
@@ -123,6 +129,8 @@ const els = {
   accountName: document.getElementById("accountName"),
   accountRoleBadge: document.getElementById("accountRoleBadge"),
   logoutBtn: document.getElementById("logoutBtn"),
+  adminPortalBtn: document.getElementById("adminPortalBtn"),
+  openAppBtn: document.getElementById("openAppBtn"),
   refreshAdminBtn: document.getElementById("refreshAdminBtn"),
   adminTotalUsers: document.getElementById("adminTotalUsers"),
   adminTotalAdmins: document.getElementById("adminTotalAdmins"),
@@ -150,6 +158,7 @@ const els = {
   latestReflectionBody: document.getElementById("latestReflectionBody"),
   markTodayBtn: document.getElementById("markTodayBtn"),
   bookmarkList: document.getElementById("bookmarkList"),
+  bookmarksPanelList: document.getElementById("bookmarksPanelList"),
   readingPlanList: document.getElementById("readingPlanList"),
   verseSearch: document.getElementById("verseSearch"),
   verseResults: document.getElementById("verseResults"),
@@ -187,13 +196,17 @@ function initialize() {
   ensureAdminPresence();
   ensureDefaultAnnouncements();
   bindTabs();
-  bindQuickLinks();
+  bindRouteLinks();
   bindAuth();
   bindAdmin();
-  bindFaq();
-  bindForms();
-  bindDashboardActions();
-  bindBibleReader();
+
+  if (!isAdminRoute) {
+    bindQuickLinks();
+    bindFaq();
+    bindForms();
+    bindDashboardActions();
+    bindBibleReader();
+  }
 
   const sessionUser = getSessionUser();
   if (sessionUser) {
@@ -202,6 +215,16 @@ function initialize() {
     } else {
       activateUserSession(sessionUser);
     }
+    return;
+  }
+
+  if (isAdminRoute) {
+    els.continueGuestBtn.classList.add("is-hidden");
+    els.openSignupBtn.classList.add("is-hidden");
+    els.showSignupBtn.classList.add("is-hidden");
+    els.signupForm.classList.add("is-hidden");
+    showAuthCard("login");
+    showAuthMessage("Admin portal only. Sign in with an admin account.", false);
     return;
   }
 
@@ -227,10 +250,36 @@ function bindQuickLinks() {
   });
 }
 
+function bindRouteLinks() {
+  if (els.adminPortalBtn) {
+    els.adminPortalBtn.addEventListener("click", () => {
+      if (!isCurrentUserAdmin()) {
+        return;
+      }
+      goToRoute(ADMIN_ROUTE);
+    });
+  }
+
+  if (els.openAppBtn) {
+    els.openAppBtn.addEventListener("click", () => {
+      goToRoute(INDEX_ROUTE);
+    });
+  }
+}
+
 function setActiveTab(target) {
   const isAdminTab = target === "admin";
-  if (isAdminTab && !isCurrentUserAdmin()) {
-    target = "dashboard";
+  if (isAdminTab) {
+    if (!isCurrentUserAdmin()) {
+      target = "dashboard";
+    } else if (!isAdminRoute) {
+      goToRoute(ADMIN_ROUTE);
+      return;
+    }
+  }
+
+  if (isAdminRoute) {
+    target = "admin";
   }
 
   const tabs = document.querySelectorAll("nav.tabs .tab[data-tab]");
@@ -299,12 +348,22 @@ function bindAuth() {
       saveUsers(users);
     }
 
+    if (isAdminRoute && normalizeRole(user.role) !== "admin") {
+      showAuthMessage("Admin portal only. Use an admin account.", true);
+      return;
+    }
+
     activateUserSession(user);
     showAuthMessage("", false);
   });
 
   els.signupForm.addEventListener("submit", (event) => {
     event.preventDefault();
+
+    if (isAdminRoute) {
+      showAuthMessage("Sign up from the main app page. Admin portal is login-only.", true);
+      return;
+    }
 
     const name = els.signupName.value.trim();
     const email = normalizeEmail(els.signupEmail.value);
@@ -365,28 +424,32 @@ function bindAuth() {
 }
 
 function bindAdmin() {
-  els.refreshAdminBtn.addEventListener("click", () => {
-    renderAdminPanel();
-  });
+  if (els.refreshAdminBtn) {
+    els.refreshAdminBtn.addEventListener("click", () => {
+      renderAdminPanel();
+    });
+  }
 
-  els.adminUsersList.addEventListener("click", (event) => {
-    const button = event.target.closest("button");
-    if (!button || !isCurrentUserAdmin()) {
-      return;
-    }
+  if (els.adminUsersList) {
+    els.adminUsersList.addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      if (!button || !isCurrentUserAdmin()) {
+        return;
+      }
 
-    const roleTargetId = button.dataset.roleUserId;
-    const deleteTargetId = button.dataset.deleteUserId;
+      const roleTargetId = button.dataset.roleUserId;
+      const deleteTargetId = button.dataset.deleteUserId;
 
-    if (roleTargetId) {
-      toggleUserRole(roleTargetId);
-      return;
-    }
+      if (roleTargetId) {
+        toggleUserRole(roleTargetId);
+        return;
+      }
 
-    if (deleteTargetId) {
-      deleteUser(deleteTargetId);
-    }
-  });
+      if (deleteTargetId) {
+        deleteUser(deleteTargetId);
+      }
+    });
+  }
 
   if (els.adminPrayerRequests) {
     els.adminPrayerRequests.addEventListener("click", (event) => {
@@ -507,6 +570,10 @@ function bindFaq() {
 }
 
 function setAuthMode(mode) {
+  if (isAdminRoute) {
+    mode = "login";
+  }
+
   const isLogin = mode === "login";
   els.showLoginBtn.classList.toggle("is-active", isLogin);
   els.showSignupBtn.classList.toggle("is-active", !isLogin);
@@ -526,6 +593,11 @@ function showAuthGate() {
 }
 
 function showGuestLanding() {
+  if (isAdminRoute) {
+    showAuthCard("login");
+    return;
+  }
+
   showAuthGate();
   els.guestLanding.classList.remove("is-hidden");
   els.authCard.classList.add("is-hidden");
@@ -552,6 +624,11 @@ function isCurrentUserAdmin() {
 }
 
 function activateGuestSession() {
+  if (isAdminRoute) {
+    goToRoute(INDEX_ROUTE);
+    return;
+  }
+
   currentUser = createGuestUser();
   setGuestSession();
   state = loadStateForUser(currentUser.id);
@@ -572,13 +649,28 @@ function activateUserSession(user) {
     role: normalizeRole(user.role)
   };
   setSession(user.id);
+
+  if (isAdminRoute && !isCurrentUserAdmin()) {
+    goToRoute(INDEX_ROUTE);
+    return;
+  }
+
+  if (isAdminRoute) {
+    els.accountName.textContent = `${user.name} (${user.email})`;
+    els.accountRoleBadge.textContent = "Admin";
+    setActiveTab("admin");
+    showAppShell();
+    renderAdminPanel();
+    return;
+  }
+
   state = loadStateForUser(user.id);
   initializeBibleReaderInputs();
   renderAll();
   loadBibleChapter();
   els.accountName.textContent = `${user.name} (${user.email})`;
   els.accountRoleBadge.textContent = isCurrentUserAdmin() ? "Admin" : "Member";
-  setActiveTab("dashboard");
+  setActiveTab(isAdminRoute ? "admin" : "dashboard");
   els.loginForm.reset();
   els.signupForm.reset();
   showAppShell();
@@ -798,14 +890,54 @@ function renderNextReading() {
 function renderBookmarks() {
   const saved = state.bookmarks;
 
-  if (!saved.length) {
+  if (els.bookmarkList && !saved.length) {
     els.bookmarkList.innerHTML = '<p class="empty">No bookmarks yet. Save passages from Verse Explorer or Bible Reader.</p>';
+  }
+
+  if (els.bookmarkList && saved.length) {
+    els.bookmarkList.innerHTML = saved
+      .map((reference) => `<span class="chip">${escapeHtml(reference)}</span>`)
+      .join("");
+  }
+
+  if (!els.bookmarksPanelList) {
     return;
   }
 
-  els.bookmarkList.innerHTML = saved
-    .map((reference) => `<span class="chip">${escapeHtml(reference)}</span>`)
+  if (!saved.length) {
+    els.bookmarksPanelList.innerHTML = '<p class="empty">No bookmarks saved yet. Use "Bookmark Chapter" in Bible Reader or "Save" in Verse Explorer.</p>';
+    return;
+  }
+
+  els.bookmarksPanelList.innerHTML = saved
+    .map((reference) => {
+      return `
+        <article class="entry">
+          <h4>${escapeHtml(reference)}</h4>
+          <p class="meta">Saved for quick return.</p>
+          <div class="entry-actions">
+            <button class="small-btn ok" type="button" data-open-bookmark="${escapeHtml(reference)}">Open</button>
+            <button class="small-btn danger" type="button" data-remove-bookmark="${escapeHtml(reference)}">Remove</button>
+          </div>
+        </article>
+      `;
+    })
     .join("");
+
+  els.bookmarksPanelList.querySelectorAll("[data-open-bookmark]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const reference = button.dataset.openBookmark;
+      openBookmarkReference(reference);
+    });
+  });
+
+  els.bookmarksPanelList.querySelectorAll("[data-remove-bookmark]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const reference = button.dataset.removeBookmark;
+      toggleBookmark(reference);
+      renderAll();
+    });
+  });
 }
 
 function renderLatestReflection() {
@@ -1053,15 +1185,27 @@ function refreshAdminVisibility() {
   const isAdmin = isCurrentUserAdmin();
 
   adminOnlyElements.forEach((element) => {
-    element.classList.toggle("is-hidden", !isAdmin);
+    const requiresAdminRoute = element.hasAttribute("data-admin-route-only");
+    const requiresMainRoute = element.hasAttribute("data-main-route-only");
+    const routeMatches = (!requiresAdminRoute || isAdminRoute) && (!requiresMainRoute || !isAdminRoute);
+    element.classList.toggle("is-hidden", !(isAdmin && routeMatches));
   });
 
-  if (!isAdmin) {
+  if (isAdminRoute && !isAdmin) {
+    goToRoute(INDEX_ROUTE);
+    return;
+  }
+
+  if (!isAdmin && !isAdminRoute) {
     setActiveTab("dashboard");
   }
 }
 
 function renderAdminPanel() {
+  if (!els.adminTotalUsers || !els.adminTotalAdmins || !els.adminUsersList) {
+    return;
+  }
+
   if (!isCurrentUserAdmin()) {
     return;
   }
@@ -1219,7 +1363,9 @@ function deleteUser(userId) {
 }
 
 function showAdminNotice(message) {
-  els.adminNotice.textContent = message;
+  if (els.adminNotice) {
+    els.adminNotice.textContent = message;
+  }
 }
 
 function getManagedProfiles() {
@@ -1444,6 +1590,64 @@ function getSelectedChapterReference() {
   return `${els.bibleBook.value} ${els.bibleChapter.value}`;
 }
 
+function parseBookmarkReference(reference) {
+  const normalized = String(reference || "").trim();
+  if (!normalized) {
+    return null;
+  }
+
+  let matchingBook = bibleBooks.find((book) => normalized.toLowerCase().startsWith(`${book.name.toLowerCase()} `));
+
+  if (!matchingBook) {
+    const alias = Object.keys(BOOK_ALIASES).find((key) => normalized.toLowerCase().startsWith(`${key.toLowerCase()} `));
+    if (alias) {
+      const canonical = BOOK_ALIASES[alias];
+      matchingBook = bibleBooks.find((book) => book.name === canonical);
+    }
+  }
+
+  if (!matchingBook) {
+    return null;
+  }
+
+  const bookNameLength = matchingBook.name.split(" ").length;
+  const remainder = normalized.split(" ").slice(bookNameLength).join(" ").trim();
+  const chapterMatch = remainder.match(/^(\d+)/);
+  if (!chapterMatch) {
+    return null;
+  }
+
+  const chapter = Number(chapterMatch[1]);
+  if (!Number.isFinite(chapter) || chapter < 1 || chapter > matchingBook.chapters) {
+    return null;
+  }
+
+  return {
+    book: matchingBook.name,
+    chapter
+  };
+}
+
+function openBookmarkReference(reference) {
+  const target = parseBookmarkReference(reference);
+  if (!target) {
+    setActiveTab("bible");
+    els.bibleStatus.textContent = `Could not open ${reference}.`;
+    return;
+  }
+
+  state.bibleReader.book = target.book;
+  state.bibleReader.chapter = target.chapter;
+  saveState();
+
+  initializeBibleReaderInputs();
+  els.bibleBook.value = target.book;
+  populateBibleChapterOptions(target.book, target.chapter);
+  els.bibleChapter.value = String(target.chapter);
+  setActiveTab("bible");
+  loadBibleChapter();
+}
+
 function getVerseInsightText(verse) {
   if (verseInsightMap[verse.reference]) {
     return verseInsightMap[verse.reference];
@@ -1614,6 +1818,14 @@ function ensureAdminPresence() {
 
   users[0].role = "admin";
   saveUsers(users);
+}
+
+function goToRoute(route) {
+  const target = `${window.location.origin}/${route}`;
+  if (`${window.location.origin}${window.location.pathname}` === target) {
+    return;
+  }
+  window.location.href = target;
 }
 
 function ensureDefaultAnnouncements() {

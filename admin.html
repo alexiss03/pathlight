@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pathlight Admin Portal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="bg-shape shape-a"></div>
+  <div class="bg-shape shape-b"></div>
+
+  <section id="authGate" class="auth-gate">
+    <div id="guestLanding" class="auth-card reveal">
+      <p class="eyebrow auth-eyebrow">Admin</p>
+      <h2>Pathlight Admin Portal</h2>
+      <p class="meta">This area is restricted to admin accounts.</p>
+      <div class="auth-actions">
+        <button id="openLoginBtn" class="btn" type="button">Log In</button>
+        <button id="continueGuestBtn" class="small-btn" type="button">Continue As Guest</button>
+        <button id="openSignupBtn" class="small-btn" type="button">Sign Up</button>
+      </div>
+    </div>
+
+    <div id="authCard" class="auth-card reveal is-hidden">
+      <p class="eyebrow auth-eyebrow">Admin</p>
+      <h2>Sign In To Admin Portal</h2>
+      <p class="meta">Use an admin account to manage users, prayer requests, and announcements.</p>
+
+      <div class="auth-switch" role="tablist" aria-label="Authentication mode">
+        <button id="showLoginBtn" class="tab is-active" type="button">Login</button>
+        <button id="showSignupBtn" class="tab" type="button">Sign Up</button>
+      </div>
+
+      <form id="loginForm" class="stack">
+        <label for="loginEmail" class="label">Email</label>
+        <input id="loginEmail" type="email" required placeholder="you@example.com" />
+        <label for="loginPassword" class="label">Password</label>
+        <input id="loginPassword" type="password" required minlength="6" placeholder="Enter your password" />
+        <button class="btn" type="submit">Log In</button>
+      </form>
+
+      <form id="signupForm" class="stack is-hidden">
+        <label for="signupName" class="label">Full Name</label>
+        <input id="signupName" type="text" required maxlength="80" placeholder="Your name" />
+        <label for="signupEmail" class="label">Email</label>
+        <input id="signupEmail" type="email" required placeholder="you@example.com" />
+        <label for="signupPassword" class="label">Password</label>
+        <input id="signupPassword" type="password" required minlength="6" placeholder="At least 6 characters" />
+        <label for="signupConfirmPassword" class="label">Confirm Password</label>
+        <input id="signupConfirmPassword" type="password" required minlength="6" placeholder="Re-enter password" />
+        <button class="btn" type="submit">Create Account</button>
+      </form>
+
+      <p id="authMessage" class="auth-message" aria-live="polite"></p>
+      <button id="backToLandingBtn" class="small-btn" type="button">Back</button>
+    </div>
+  </section>
+
+  <div id="appShell" class="app-shell is-hidden">
+    <div class="app-frame">
+      <div class="app-primary">
+        <header class="hero reveal">
+          <div class="topbar">
+            <p class="eyebrow">Pathlight Admin Portal</p>
+            <div class="top-links">
+              <span class="quick-link is-active">Admin</span>
+              <button id="adminPortalBtn" class="quick-link is-hidden" type="button" data-admin-only data-main-route-only>Admin Portal</button>
+              <button id="openAppBtn" class="quick-link is-hidden" type="button" data-admin-only data-admin-route-only>Open App</button>
+            </div>
+            <button id="logoutBtn" class="small-btn" type="button">Log Out</button>
+          </div>
+          <h1>Admin Console</h1>
+          <p class="subtitle">Manage users, prayer requests, and announcements outside the user dashboard.</p>
+          <div class="account-row">
+            <p id="accountName" class="meta account-name"></p>
+            <span id="accountRoleBadge" class="role-badge">Admin</span>
+          </div>
+        </header>
+
+        <nav class="tabs reveal" aria-label="Admin sections">
+          <button class="tab is-active" data-tab="admin">Admin</button>
+        </nav>
+
+        <main>
+          <section id="panel-admin" class="panel is-active reveal" data-panel data-admin-only data-admin-route-only>
+            <div class="grid two-up">
+              <article class="card">
+                <h2>Admin Overview</h2>
+                <p id="adminTotalUsers" class="meta">Total users: 0</p>
+                <p id="adminTotalAdmins" class="meta">Admins: 0</p>
+                <p id="adminTotalPrayers" class="meta">Prayer requests: 0</p>
+                <p id="adminTotalAnnouncements" class="meta">Announcements: 0</p>
+                <button id="refreshAdminBtn" class="small-btn" type="button">Refresh</button>
+              </article>
+              <article class="card">
+                <h2>Account Help</h2>
+                <p class="meta">Only admins can access this panel.</p>
+                <p class="meta">Promote or demote users, manage prayer requests, and publish announcements.</p>
+              </article>
+            </div>
+
+            <div class="grid two-up">
+              <form id="announcementForm" class="card stack" autocomplete="off">
+                <h2>Post Announcement</h2>
+                <label for="announcementTitle" class="label">Title</label>
+                <input id="announcementTitle" required maxlength="90" placeholder="New reading challenge this week" />
+                <label for="announcementBody" class="label">Message</label>
+                <textarea id="announcementBody" required rows="4" maxlength="500" placeholder="Share updates, encouragement, or ministry news..."></textarea>
+                <button class="btn" type="submit">Publish</button>
+              </form>
+              <div class="card">
+                <h2>Published Announcements</h2>
+                <div id="adminAnnouncementsList" class="stack"></div>
+              </div>
+            </div>
+
+            <div class="card">
+              <h2>Prayer Request Management</h2>
+              <div id="adminPrayerRequests" class="stack"></div>
+            </div>
+
+            <div class="card">
+              <h2>User Management</h2>
+              <p id="adminNotice" class="meta"></p>
+              <div id="adminUsersList" class="stack"></div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
