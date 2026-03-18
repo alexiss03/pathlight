@@ -2,12 +2,6 @@ const USERS_STORAGE_KEY = "pathlight-bible-users-v1";
 const SESSION_STORAGE_KEY = "pathlight-bible-session-v1";
 const APP_STATE_PREFIX = "pathlight-bible-state-v1:";
 const ANNOUNCEMENTS_STORAGE_KEY = "pathlight-bible-announcements-v1";
-const ADMIN_DEFAULT = {
-  name: "Pathlight Admin",
-  email: "admin@pathlight.local",
-  password: "Admin123!",
-  role: "admin"
-};
 const GUEST_USER_ID = "guest-local";
 
 const readingPlan = [
@@ -190,7 +184,7 @@ const els = {
 initialize();
 
 function initialize() {
-  ensureDefaultAdminUser();
+  ensureAdminPresence();
   ensureDefaultAnnouncements();
   bindTabs();
   bindQuickLinks();
@@ -292,12 +286,13 @@ function bindAuth() {
     if (!user) {
       const users = loadUsers();
       const fallbackName = email.split("@")[0] || "Member";
+      const role = countAdmins(users) === 0 ? "admin" : "member";
       user = {
         id: crypto.randomUUID(),
         name: fallbackName.charAt(0).toUpperCase() + fallbackName.slice(1),
         email,
         password,
-        role: "member",
+        role,
         createdAt: new Date().toISOString()
       };
       users.push(user);
@@ -343,12 +338,13 @@ function bindAuth() {
     }
 
     const users = loadUsers();
+    const role = countAdmins(users) === 0 ? "admin" : "member";
     const user = {
       id: crypto.randomUUID(),
       name,
       email,
       password,
-      role: "member",
+      role,
       createdAt: new Date().toISOString()
     };
 
@@ -1610,21 +1606,13 @@ function countAdmins(users) {
   return users.filter((user) => normalizeRole(user.role) === "admin").length;
 }
 
-function ensureDefaultAdminUser() {
+function ensureAdminPresence() {
   const users = loadUsers();
-  const existingAdmin = users.find((user) => normalizeEmail(user.email) === ADMIN_DEFAULT.email);
-  if (existingAdmin) {
+  if (!users.length || countAdmins(users) > 0) {
     return;
   }
 
-  users.push({
-    id: crypto.randomUUID(),
-    name: ADMIN_DEFAULT.name,
-    email: ADMIN_DEFAULT.email,
-    password: ADMIN_DEFAULT.password,
-    role: ADMIN_DEFAULT.role,
-    createdAt: new Date().toISOString()
-  });
+  users[0].role = "admin";
   saveUsers(users);
 }
 
