@@ -3,6 +3,7 @@ const SESSION_STORAGE_KEY = "pathlight-bible-session-v1";
 const APP_STATE_PREFIX = "pathlight-bible-state-v1:";
 const ANNOUNCEMENTS_STORAGE_KEY = "pathlight-bible-announcements-v1";
 const GUEST_USER_ID = "guest-local";
+const BLOCKED_ACCOUNT_EMAILS = new Set(["a@a.com"]);
 const INDEX_ROUTE = "index.html";
 const ADMIN_ROUTE = "admin.html";
 const ADMIN_LOGIN_ROUTE = "admin-login.html";
@@ -196,6 +197,7 @@ const els = {
 initialize();
 
 function initialize() {
+  removeBlockedAccounts();
   ensureAdminPresence();
   ensureDefaultAnnouncements();
   bindTabs();
@@ -1837,6 +1839,39 @@ function ensureAdminPresence() {
 
   users[0].role = "admin";
   saveUsers(users);
+}
+
+function removeBlockedAccounts() {
+  const users = loadUsers();
+  if (!users.length) {
+    return;
+  }
+
+  const removedUsers = users.filter((user) => BLOCKED_ACCOUNT_EMAILS.has(normalizeEmail(user.email)));
+  if (!removedUsers.length) {
+    return;
+  }
+
+  const removedIds = new Set(removedUsers.map((user) => user.id));
+  const remainingUsers = users.filter((user) => !removedIds.has(user.id));
+
+  removedIds.forEach((userId) => {
+    localStorage.removeItem(`${APP_STATE_PREFIX}${userId}`);
+  });
+
+  const session = localStorage.getItem(SESSION_STORAGE_KEY);
+  if (session) {
+    try {
+      const parsed = JSON.parse(session);
+      if (parsed && removedIds.has(parsed.userId)) {
+        clearSession();
+      }
+    } catch (error) {
+      clearSession();
+    }
+  }
+
+  saveUsers(remainingUsers);
 }
 
 function goToRoute(route) {
