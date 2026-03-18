@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pathlight Admin Login</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="bg-shape shape-a"></div>
+  <div class="bg-shape shape-b"></div>
+
+  <section id="authGate" class="auth-gate">
+    <div id="guestLanding" class="auth-card reveal">
+      <p class="eyebrow auth-eyebrow">Admin</p>
+      <h2>Pathlight Admin Login</h2>
+      <p class="meta">Sign in with an admin account to access the admin panel.</p>
+      <div class="auth-actions">
+        <button id="openLoginBtn" class="btn" type="button">Log In</button>
+        <button id="continueGuestBtn" class="small-btn" type="button">Continue As Guest</button>
+        <button id="openSignupBtn" class="small-btn" type="button">Sign Up</button>
+        <button id="openAdminLoginBtn" class="small-btn is-hidden" type="button">Admin Login</button>
+      </div>
+    </div>
+
+    <div id="authCard" class="auth-card reveal is-hidden">
+      <p class="eyebrow auth-eyebrow">Admin</p>
+      <h2>Sign In To Admin Portal</h2>
+      <p class="meta">Admin login is separated from the user dashboard.</p>
+
+      <div class="auth-switch" role="tablist" aria-label="Authentication mode">
+        <button id="showLoginBtn" class="tab is-active" type="button">Login</button>
+        <button id="showSignupBtn" class="tab" type="button">Sign Up</button>
+      </div>
+
+      <form id="loginForm" class="stack">
+        <label for="loginEmail" class="label">Email</label>
+        <input id="loginEmail" type="email" required placeholder="you@example.com" />
+        <label for="loginPassword" class="label">Password</label>
+        <input id="loginPassword" type="password" required minlength="6" placeholder="Enter your password" />
+        <button class="btn" type="submit">Log In</button>
+      </form>
+
+      <form id="signupForm" class="stack is-hidden">
+        <label for="signupName" class="label">Full Name</label>
+        <input id="signupName" type="text" required maxlength="80" placeholder="Your name" />
+        <label for="signupEmail" class="label">Email</label>
+        <input id="signupEmail" type="email" required placeholder="you@example.com" />
+        <label for="signupPassword" class="label">Password</label>
+        <input id="signupPassword" type="password" required minlength="6" placeholder="At least 6 characters" />
+        <label for="signupConfirmPassword" class="label">Confirm Password</label>
+        <input id="signupConfirmPassword" type="password" required minlength="6" placeholder="Re-enter password" />
+        <button class="btn" type="submit">Create Account</button>
+      </form>
+
+      <p id="authMessage" class="auth-message" aria-live="polite"></p>
+      <button id="backToLandingBtn" class="small-btn" type="button">Back</button>
+    </div>
+  </section>
+
+  <div id="appShell" class="app-shell is-hidden">
+    <div class="app-frame">
+      <div class="app-primary">
+        <header class="hero reveal">
+          <div class="topbar">
+            <p class="eyebrow">Pathlight Admin Login</p>
+            <div class="top-links">
+              <button id="adminPortalBtn" class="quick-link is-hidden" type="button" data-admin-only data-main-route-only>Admin Portal</button>
+              <button id="openAppBtn" class="quick-link" type="button" data-admin-only data-admin-route-only>Open App</button>
+            </div>
+            <button id="logoutBtn" class="small-btn" type="button">Log Out</button>
+          </div>
+          <h1>Admin Login</h1>
+          <p class="subtitle">You will be redirected to the admin panel after successful login.</p>
+          <div class="account-row">
+            <p id="accountName" class="meta account-name"></p>
+            <span id="accountRoleBadge" class="role-badge">Admin</span>
+          </div>
+        </header>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

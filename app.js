@@ -5,7 +5,10 @@ const ANNOUNCEMENTS_STORAGE_KEY = "pathlight-bible-announcements-v1";
 const GUEST_USER_ID = "guest-local";
 const INDEX_ROUTE = "index.html";
 const ADMIN_ROUTE = "admin.html";
+const ADMIN_LOGIN_ROUTE = "admin-login.html";
 const isAdminRoute = window.location.pathname.endsWith(`/${ADMIN_ROUTE}`) || window.location.pathname.endsWith(ADMIN_ROUTE);
+const isAdminLoginRoute = window.location.pathname.endsWith(`/${ADMIN_LOGIN_ROUTE}`) || window.location.pathname.endsWith(ADMIN_LOGIN_ROUTE);
+const isAdminContextRoute = isAdminRoute || isAdminLoginRoute;
 const BOOK_ALIASES = {
   Psalm: "Psalms"
 };
@@ -114,6 +117,7 @@ const els = {
   continueGuestBtn: document.getElementById("continueGuestBtn"),
   openLoginBtn: document.getElementById("openLoginBtn"),
   openSignupBtn: document.getElementById("openSignupBtn"),
+  openAdminLoginBtn: document.getElementById("openAdminLoginBtn"),
   backToLandingBtn: document.getElementById("backToLandingBtn"),
   showLoginBtn: document.getElementById("showLoginBtn"),
   showSignupBtn: document.getElementById("showSignupBtn"),
@@ -200,7 +204,7 @@ function initialize() {
   bindAuth();
   bindAdmin();
 
-  if (!isAdminRoute) {
+  if (!isAdminContextRoute) {
     bindQuickLinks();
     bindFaq();
     bindForms();
@@ -219,12 +223,17 @@ function initialize() {
   }
 
   if (isAdminRoute) {
+    goToRoute(ADMIN_LOGIN_ROUTE);
+    return;
+  }
+
+  if (isAdminLoginRoute) {
     els.continueGuestBtn.classList.add("is-hidden");
     els.openSignupBtn.classList.add("is-hidden");
     els.showSignupBtn.classList.add("is-hidden");
     els.signupForm.classList.add("is-hidden");
     showAuthCard("login");
-    showAuthMessage("Admin portal only. Sign in with an admin account.", false);
+    showAuthMessage("Admin login only. Sign in with an admin account.", false);
     return;
   }
 
@@ -251,12 +260,18 @@ function bindQuickLinks() {
 }
 
 function bindRouteLinks() {
+  if (els.openAdminLoginBtn) {
+    els.openAdminLoginBtn.addEventListener("click", () => {
+      goToRoute(ADMIN_LOGIN_ROUTE);
+    });
+  }
+
   if (els.adminPortalBtn) {
     els.adminPortalBtn.addEventListener("click", () => {
       if (!isCurrentUserAdmin()) {
         return;
       }
-      goToRoute(ADMIN_ROUTE);
+      goToRoute(ADMIN_LOGIN_ROUTE);
     });
   }
 
@@ -348,8 +363,13 @@ function bindAuth() {
       saveUsers(users);
     }
 
-    if (isAdminRoute && normalizeRole(user.role) !== "admin") {
-      showAuthMessage("Admin portal only. Use an admin account.", true);
+    if (isAdminContextRoute && normalizeRole(user.role) !== "admin") {
+      showAuthMessage("Admin login only. Use an admin account.", true);
+      return;
+    }
+
+    if (!isAdminContextRoute && normalizeRole(user.role) === "admin") {
+      showAuthMessage("Use the admin login page for admin access.", true);
       return;
     }
 
@@ -360,7 +380,7 @@ function bindAuth() {
   els.signupForm.addEventListener("submit", (event) => {
     event.preventDefault();
 
-    if (isAdminRoute) {
+    if (isAdminContextRoute) {
       showAuthMessage("Sign up from the main app page. Admin portal is login-only.", true);
       return;
     }
@@ -570,7 +590,7 @@ function bindFaq() {
 }
 
 function setAuthMode(mode) {
-  if (isAdminRoute) {
+  if (isAdminContextRoute) {
     mode = "login";
   }
 
@@ -593,7 +613,7 @@ function showAuthGate() {
 }
 
 function showGuestLanding() {
-  if (isAdminRoute) {
+  if (isAdminContextRoute) {
     showAuthCard("login");
     return;
   }
@@ -624,7 +644,7 @@ function isCurrentUserAdmin() {
 }
 
 function activateGuestSession() {
-  if (isAdminRoute) {
+  if (isAdminContextRoute) {
     goToRoute(INDEX_ROUTE);
     return;
   }
@@ -650,8 +670,17 @@ function activateUserSession(user) {
   };
   setSession(user.id);
 
+  if (isAdminLoginRoute) {
+    if (isCurrentUserAdmin()) {
+      goToRoute(ADMIN_ROUTE);
+    } else {
+      goToRoute(INDEX_ROUTE);
+    }
+    return;
+  }
+
   if (isAdminRoute && !isCurrentUserAdmin()) {
-    goToRoute(INDEX_ROUTE);
+    goToRoute(ADMIN_LOGIN_ROUTE);
     return;
   }
 
