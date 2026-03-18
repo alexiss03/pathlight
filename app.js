@@ -133,7 +133,6 @@ const els = {
   accountName: document.getElementById("accountName"),
   accountRoleBadge: document.getElementById("accountRoleBadge"),
   logoutBtn: document.getElementById("logoutBtn"),
-  adminPortalBtn: document.getElementById("adminPortalBtn"),
   openAppBtn: document.getElementById("openAppBtn"),
   refreshAdminBtn: document.getElementById("refreshAdminBtn"),
   adminTotalUsers: document.getElementById("adminTotalUsers"),
@@ -266,15 +265,6 @@ function bindRouteLinks() {
     });
   }
 
-  if (els.adminPortalBtn) {
-    els.adminPortalBtn.addEventListener("click", () => {
-      if (!isCurrentUserAdmin()) {
-        return;
-      }
-      goToRoute(ADMIN_LOGIN_ROUTE);
-    });
-  }
-
   if (els.openAppBtn) {
     els.openAppBtn.addEventListener("click", () => {
       goToRoute(INDEX_ROUTE);
@@ -381,7 +371,7 @@ function bindAuth() {
     event.preventDefault();
 
     if (isAdminContextRoute) {
-      showAuthMessage("Sign up from the main app page. Admin portal is login-only.", true);
+      showAuthMessage("Sign up from the main app page. Admin login is separate.", true);
       return;
     }
 
