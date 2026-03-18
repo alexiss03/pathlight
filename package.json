@@ -1,0 +1,13 @@
+{
+  "name": "pathlight",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pathlight Bible Study app",
+  "scripts": {
+    "build": "echo 'No build step required'",
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
