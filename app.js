@@ -118,7 +118,6 @@ const els = {
   continueGuestBtn: document.getElementById("continueGuestBtn"),
   openLoginBtn: document.getElementById("openLoginBtn"),
   openSignupBtn: document.getElementById("openSignupBtn"),
-  openAdminLoginBtn: document.getElementById("openAdminLoginBtn"),
   backToLandingBtn: document.getElementById("backToLandingBtn"),
   showLoginBtn: document.getElementById("showLoginBtn"),
   showSignupBtn: document.getElementById("showSignupBtn"),
@@ -261,12 +260,6 @@ function bindQuickLinks() {
 }
 
 function bindRouteLinks() {
-  if (els.openAdminLoginBtn) {
-    els.openAdminLoginBtn.addEventListener("click", () => {
-      goToRoute(ADMIN_LOGIN_ROUTE);
-    });
-  }
-
   if (els.openAppBtn) {
     els.openAppBtn.addEventListener("click", () => {
       goToRoute(INDEX_ROUTE);
