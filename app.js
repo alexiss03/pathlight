@@ -13,6 +13,7 @@ const isAdminContextRoute = isAdminRoute || isAdminLoginRoute;
 const BOOK_ALIASES = {
   Psalm: "Psalms"
 };
+const TRACKING_QUERY_PARAMS = ["fbclid", "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"];
 
 const readingPlan = [
   { id: 1, day: 1, reference: "Psalm 1", theme: "Delight in God's Word", prompt: "What fruit comes from meditating on Scripture?" },
@@ -193,7 +194,32 @@ const els = {
   prayerList: document.getElementById("prayerList")
 };
 
+stripTrackingQueryParams();
 initialize();
+
+function stripTrackingQueryParams() {
+  if (!window.history || typeof window.history.replaceState !== "function") {
+    return;
+  }
+
+  const url = new URL(window.location.href);
+  let didChange = false;
+
+  TRACKING_QUERY_PARAMS.forEach((key) => {
+    if (url.searchParams.has(key)) {
+      url.searchParams.delete(key);
+      didChange = true;
+    }
+  });
+
+  if (!didChange) {
+    return;
+  }
+
+  const nextQuery = url.searchParams.toString();
+  const cleanUrl = `${url.pathname}${nextQuery ? `?${nextQuery}` : ""}${url.hash}`;
+  window.history.replaceState({}, document.title, cleanUrl);
+}
 
 function initialize() {
   removeBlockedAccounts();
