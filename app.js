@@ -19,6 +19,12 @@ const BOOK_ALIASES = {
   Psalm: "Psalms"
 };
 const TRACKING_QUERY_PARAMS = ["fbclid", "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"];
+const TRANSLATION_LABELS = {
+  kjv: "KJV",
+  web: "WEB",
+  bbe: "BBE",
+  tag: "TAG"
+};
 
 const readingPlan = [
   { id: 1, day: 1, reference: "Psalm 1", theme: "Delight in God's Word", prompt: "What fruit comes from meditating on Scripture?" },
@@ -98,7 +104,7 @@ const DEFAULT_BIBLE_READER = {
   translation: "kjv"
 };
 
-const SUPPORTED_TRANSLATIONS = new Set(["kjv", "web", "bbe"]);
+const SUPPORTED_TRANSLATIONS = new Set(["kjv", "web", "bbe", "tag"]);
 
 const reflectionPrompts = [
   "What truth from Scripture is God highlighting for you today?",
@@ -1589,21 +1595,14 @@ async function loadBibleChapter() {
   els.bibleChapterInsight.textContent = "";
 
   try {
-    const response = await fetch(`https://bible-api.com/${query}?translation=${translation}`);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const payload = await response.json();
-    const versesList = Array.isArray(payload.verses) ? payload.verses : [];
-    const title = payload.reference || reference;
+    const { title, versesList, text } = await fetchBibleChapter(reference, chapter, translation, query);
 
     els.bibleChapterTitle.textContent = title;
 
     if (!versesList.length) {
-      const text = String(payload.text || "").trim();
-      els.bibleChapterContent.innerHTML = text
-        ? `<p>${escapeHtml(text)}</p>`
+      const fallbackText = String(text || "").trim();
+      els.bibleChapterContent.innerHTML = fallbackText
+        ? `<p>${escapeHtml(fallbackText)}</p>`
         : '<p class="empty">No verses returned for this chapter.</p>';
     } else {
       els.bibleChapterContent.innerHTML = versesList
@@ -1619,7 +1618,7 @@ async function loadBibleChapter() {
         .join("");
     }
 
-    const translationLabel = translation.toUpperCase();
+    const translationLabel = getTranslationLabel(translation);
     els.bibleStatus.textContent = `${title} loaded (${translationLabel}).`;
     els.bibleChapterInsight.textContent = buildChapterInsight(book.name, chapter, versesList);
     recordStudyDay();
@@ -1630,6 +1629,56 @@ async function loadBibleChapter() {
     els.bibleChapterContent.innerHTML = '<p class="empty">Chapter unavailable right now.</p>';
     els.bibleChapterInsight.textContent = "Insight unavailable until chapter text is loaded.";
   }
+}
+
+async function fetchBibleChapter(reference, chapter, translation, encodedQuery) {
+  if (translation === "tag") {
+    return fetchTagalogChapter(reference, chapter);
+  }
+
+  const response = await fetch(`https://bible-api.com/${encodedQuery}?translation=${translation}`);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const payload = await response.json();
+  return {
+    title: payload.reference || reference,
+    versesList: Array.isArray(payload.verses) ? payload.verses : [],
+    text: String(payload.text || "")
+  };
+}
+
+async function fetchTagalogChapter(reference, chapter) {
+  const response = await fetch(`https://api.biblesupersearch.com/api?bible=tagab&reference=${encodeURIComponent(reference)}&data_format=passage`);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const payload = await response.json();
+  const firstResult = Array.isArray(payload.results) ? payload.results[0] : null;
+  const tagalogVerses = firstResult?.verses?.tagab;
+  const chapterData = tagalogVerses?.[String(chapter)] || tagalogVerses?.[chapter];
+
+  if (!chapterData || typeof chapterData !== "object") {
+    throw new Error("Tagalog chapter unavailable");
+  }
+
+  const versesList = Object.keys(chapterData)
+    .sort((a, b) => Number(a) - Number(b))
+    .map((verseNumber) => {
+      const verseEntry = chapterData[verseNumber] || {};
+      return {
+        verse: Number(verseNumber),
+        text: String(verseEntry.text || "")
+      };
+    });
+
+  return {
+    title: reference,
+    versesList,
+    text: ""
+  };
 }
 
 function getSelectedChapterReference() {
@@ -1746,6 +1795,10 @@ function clampChapter(book, chapter) {
 
 function sanitizeTranslation(value) {
   return SUPPORTED_TRANSLATIONS.has(value) ? value : DEFAULT_BIBLE_READER.translation;
+}
+
+function getTranslationLabel(value) {
+  return TRANSLATION_LABELS[value] || String(value || "").toUpperCase();
 }
 
 function toggleBookmark(reference) {
