@@ -4,6 +4,11 @@ const APP_STATE_PREFIX = "pathlight-bible-state-v1:";
 const ANNOUNCEMENTS_STORAGE_KEY = "pathlight-bible-announcements-v1";
 const GUEST_USER_ID = "guest-local";
 const BLOCKED_ACCOUNT_EMAILS = new Set(["a@a.com"]);
+const DEFAULT_ADMIN_ACCOUNT = {
+  name: "Pathlight Admin",
+  email: "admin@pathlight.local",
+  password: "PathlightAdmin123!"
+};
 const INDEX_ROUTE = "index.html";
 const ADMIN_ROUTE = "admin.html";
 const ADMIN_LOGIN_ROUTE = "admin-login.html";
@@ -223,6 +228,7 @@ function stripTrackingQueryParams() {
 
 function initialize() {
   removeBlockedAccounts();
+  ensureDefaultAdminAccount();
   ensureAdminPresence();
   ensureDefaultAnnouncements();
   bindTabs();
@@ -1858,6 +1864,46 @@ function ensureAdminPresence() {
 
   users[0].role = "admin";
   saveUsers(users);
+}
+
+function ensureDefaultAdminAccount() {
+  const users = loadUsers();
+  const adminEmail = normalizeEmail(DEFAULT_ADMIN_ACCOUNT.email);
+  const existing = users.find((user) => normalizeEmail(user.email) === adminEmail);
+
+  if (!existing) {
+    users.push({
+      id: crypto.randomUUID(),
+      name: DEFAULT_ADMIN_ACCOUNT.name,
+      email: adminEmail,
+      password: DEFAULT_ADMIN_ACCOUNT.password,
+      role: "admin",
+      createdAt: new Date().toISOString()
+    });
+    saveUsers(users);
+    return;
+  }
+
+  let didChange = false;
+
+  if (normalizeRole(existing.role) !== "admin") {
+    existing.role = "admin";
+    didChange = true;
+  }
+
+  if (!existing.password || String(existing.password).trim().length < 6) {
+    existing.password = DEFAULT_ADMIN_ACCOUNT.password;
+    didChange = true;
+  }
+
+  if (!existing.name || !String(existing.name).trim()) {
+    existing.name = DEFAULT_ADMIN_ACCOUNT.name;
+    didChange = true;
+  }
+
+  if (didChange) {
+    saveUsers(users);
+  }
 }
 
 function removeBlockedAccounts() {
