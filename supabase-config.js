@@ -1,0 +1,4 @@
+window.PATHLIGHT_SUPABASE_CONFIG = {
+  url: "https://larkzjebmgpdhohjmfcf.supabase.co",
+  anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imxhcmt6amVibWdwZGhvaGptZmNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyMzc3MDUsImV4cCI6MjA5MDgxMzcwNX0.v4rULS22PMOhGrV15lTIwRGv2G0Bn2f5a5RmcGaiwcE"
+};

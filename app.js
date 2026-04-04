@@ -25,6 +25,11 @@ const TRANSLATION_LABELS = {
   bbe: "BBE",
   tag: "TAG"
 };
+const SUPABASE_TABLES = {
+  profiles: "profiles",
+  studyStates: "study_states",
+  announcements: "announcements"
+};
 
 const readingPlan = [
   { id: 1, day: 1, reference: "Psalm 1", theme: "Delight in God's Word", prompt: "What fruit comes from meditating on Scripture?" },
@@ -121,6 +126,12 @@ const reflectionPrompts = [
 
 let currentUser = null;
 let state = createDefaultState();
+let supabaseClient = null;
+let isSupabaseEnabled = false;
+let cachedUsers = [];
+let cachedAnnouncements = [];
+let cachedSessionUser = null;
+const cachedStatesByUserId = new Map();
 
 const els = {
   authGate: document.getElementById("authGate"),
@@ -206,7 +217,7 @@ const els = {
 };
 
 stripTrackingQueryParams();
-initialize();
+void initialize();
 
 function stripTrackingQueryParams() {
   if (!window.history || typeof window.history.replaceState !== "function") {
@@ -232,11 +243,65 @@ function stripTrackingQueryParams() {
   window.history.replaceState({}, document.title, cleanUrl);
 }
 
-function initialize() {
-  removeBlockedAccounts();
-  ensureDefaultAdminAccount();
-  ensureAdminPresence();
-  ensureDefaultAnnouncements();
+async function setupSupabase() {
+  const config = window.PATHLIGHT_SUPABASE_CONFIG || {};
+  const url = String(config.url || "").trim();
+  const anonKey = String(config.anonKey || "").trim();
+  const createClient = window.supabase?.createClient;
+
+  if (!url || !anonKey || typeof createClient !== "function") {
+    isSupabaseEnabled = false;
+    supabaseClient = null;
+    return;
+  }
+
+  supabaseClient = createClient(url, anonKey);
+  isSupabaseEnabled = true;
+}
+
+async function hydrateSupabaseBootstrap() {
+  cachedAnnouncements = await fetchSupabaseAnnouncements();
+
+  const sessionResult = await supabaseClient.auth.getSession();
+  const authUser = sessionResult?.data?.session?.user || null;
+
+  if (!authUser) {
+    cachedSessionUser = null;
+    return;
+  }
+
+  const profile = await ensureSupabaseProfile(authUser);
+  cachedSessionUser = profile;
+  cachedUsers = upsertCachedUser(cachedUsers, profile);
+  await fetchSupabaseStateForUser(authUser.id);
+}
+
+async function initialize() {
+  await setupSupabase();
+
+  if (!isSupabaseEnabled) {
+    removeBlockedAccounts();
+    ensureDefaultAdminAccount();
+    ensureAdminPresence();
+    ensureDefaultAnnouncements();
+  } else {
+    try {
+      await hydrateSupabaseBootstrap();
+      ensureDefaultAnnouncements();
+    } catch (error) {
+      isSupabaseEnabled = false;
+      supabaseClient = null;
+      cachedUsers = [];
+      cachedAnnouncements = [];
+      cachedSessionUser = null;
+      cachedStatesByUserId.clear();
+      removeBlockedAccounts();
+      ensureDefaultAdminAccount();
+      ensureAdminPresence();
+      ensureDefaultAnnouncements();
+    }
+  }
+
   bindTabs();
   bindRouteLinks();
   bindAuth();
@@ -255,7 +320,7 @@ function initialize() {
     if (sessionUser.isGuest) {
       activateGuestSession();
     } else {
-      activateUserSession(sessionUser);
+      await activateUserSession(sessionUser);
     }
     return;
   }
@@ -362,11 +427,17 @@ function bindAuth() {
     setAuthMode("signup");
   });
 
-  els.loginForm.addEventListener("submit", (event) => {
+  els.loginForm.addEventListener("submit", async (event) => {
     event.preventDefault();
 
     const email = normalizeEmail(els.loginEmail.value);
     const password = els.loginPassword.value;
+
+    if (isSupabaseEnabled) {
+      await handleSupabaseLogin(email, password);
+      return;
+    }
+
     let user = findUserByEmail(email);
 
     // Demo mode: accept any login credentials.
@@ -396,11 +467,11 @@ function bindAuth() {
       return;
     }
 
-    activateUserSession(user);
+    await activateUserSession(user);
     showAuthMessage("", false);
   });
 
-  els.signupForm.addEventListener("submit", (event) => {
+  els.signupForm.addEventListener("submit", async (event) => {
     event.preventDefault();
 
     if (isAdminContextRoute) {
@@ -439,6 +510,11 @@ function bindAuth() {
       return;
     }
 
+    if (isSupabaseEnabled) {
+      await handleSupabaseSignup({ name, email, password });
+      return;
+    }
+
     const users = loadUsers();
     const role = countAdmins(users) === 0 ? "admin" : "member";
     const user = {
@@ -452,11 +528,16 @@ function bindAuth() {
 
     users.push(user);
     saveUsers(users);
-    activateUserSession(user);
+    await activateUserSession(user);
     showAuthMessage("", false);
   });
 
-  els.logoutBtn.addEventListener("click", () => {
+  els.logoutBtn.addEventListener("click", async () => {
+    if (isSupabaseEnabled && supabaseClient) {
+      await supabaseClient.auth.signOut();
+      cachedSessionUser = null;
+    }
+
     clearSession();
     currentUser = null;
     state = createDefaultState();
@@ -686,12 +767,107 @@ function activateGuestSession() {
   showAppShell();
 }
 
-function activateUserSession(user) {
+async function handleSupabaseLogin(email, password) {
+  let loginResult = await supabaseClient.auth.signInWithPassword({ email, password });
+
+  if (loginResult.error && email === normalizeEmail(DEFAULT_ADMIN_ACCOUNT.email) && password === DEFAULT_ADMIN_ACCOUNT.password) {
+    const signUpResult = await supabaseClient.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          name: DEFAULT_ADMIN_ACCOUNT.name
+        }
+      }
+    });
+
+    if (!signUpResult.error) {
+      loginResult = await supabaseClient.auth.signInWithPassword({ email, password });
+    }
+  }
+
+  if (loginResult.error) {
+    showAuthMessage(loginResult.error.message || "Unable to log in right now.", true);
+    return;
+  }
+
+  const authUser = loginResult.data?.user || loginResult.data?.session?.user;
+  if (!authUser) {
+    showAuthMessage("Could not load your account session.", true);
+    return;
+  }
+
+  const profile = await ensureSupabaseProfile(authUser);
+  cachedSessionUser = profile;
+  await fetchSupabaseStateForUser(profile.id);
+
+  if (isAdminContextRoute && normalizeRole(profile.role) !== "admin") {
+    await supabaseClient.auth.signOut();
+    cachedSessionUser = null;
+    showAuthMessage("Admin login only. Use an admin account.", true);
+    return;
+  }
+
+  if (!isAdminContextRoute && normalizeRole(profile.role) === "admin") {
+    await supabaseClient.auth.signOut();
+    cachedSessionUser = null;
+    showAuthMessage("Use the admin login page for admin access.", true);
+    return;
+  }
+
+  await activateUserSession(profile);
+  showAuthMessage("", false);
+}
+
+async function handleSupabaseSignup({ name, email, password }) {
+  const signUpResult = await supabaseClient.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        name
+      }
+    }
+  });
+
+  if (signUpResult.error) {
+    showAuthMessage(signUpResult.error.message || "Unable to create your account right now.", true);
+    return;
+  }
+
+  const authUser = signUpResult.data?.user;
+  const session = signUpResult.data?.session;
+
+  if (!authUser) {
+    showAuthMessage("Account created. Please log in.", false);
+    setAuthMode("login");
+    return;
+  }
+
+  if (!session) {
+    showAuthMessage("Account created. Check your email or log in to continue.", false);
+    setAuthMode("login");
+    return;
+  }
+
+  const profile = await ensureSupabaseProfile(authUser, name);
+  cachedSessionUser = profile;
+  await fetchSupabaseStateForUser(profile.id);
+  await activateUserSession(profile);
+  showAuthMessage("", false);
+}
+
+async function activateUserSession(user) {
   currentUser = {
     ...user,
     role: normalizeRole(user.role)
   };
-  setSession(user.id);
+  if (isSupabaseEnabled) {
+    cachedSessionUser = currentUser;
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+  } else {
+    setSession(user.id);
+  }
 
   if (isAdminLoginRoute) {
     if (isCurrentUserAdmin()) {
@@ -712,7 +888,7 @@ function activateUserSession(user) {
     els.accountRoleBadge.textContent = "Admin";
     setActiveTab("admin");
     showAppShell();
-    renderAdminPanel();
+    await renderAdminPanel();
     return;
   }
 
@@ -1253,13 +1429,22 @@ function refreshAdminVisibility() {
   }
 }
 
-function renderAdminPanel() {
+async function renderAdminPanel() {
   if (!els.adminTotalUsers || !els.adminTotalAdmins || !els.adminUsersList) {
     return;
   }
 
   if (!isCurrentUserAdmin()) {
     return;
+  }
+
+  if (isSupabaseEnabled) {
+    try {
+      await hydrateSupabaseAdminCaches();
+    } catch (error) {
+      showAdminNotice("Could not refresh admin data from Supabase.");
+      return;
+    }
   }
 
   const users = loadUsers();
@@ -1364,7 +1549,7 @@ function renderAdminPanel() {
   }
 }
 
-function toggleUserRole(userId) {
+async function toggleUserRole(userId) {
   const users = loadUsers();
   const target = users.find((user) => user.id === userId);
   if (!target) {
@@ -1387,10 +1572,10 @@ function toggleUserRole(userId) {
   }
 
   showAdminNotice(`${target.name} is now ${target.role}.`);
-  renderAdminPanel();
+  await renderAdminPanel();
 }
 
-function deleteUser(userId) {
+async function deleteUser(userId) {
   const users = loadUsers();
   const target = users.find((user) => user.id === userId);
   if (!target) {
@@ -1409,9 +1594,15 @@ function deleteUser(userId) {
   }
 
   saveUsers(remainingUsers);
-  localStorage.removeItem(`${APP_STATE_PREFIX}${userId}`);
+  if (isSupabaseEnabled) {
+    cachedStatesByUserId.delete(userId);
+    await supabaseClient.from(SUPABASE_TABLES.studyStates).delete().eq("user_id", userId);
+    await supabaseClient.from(SUPABASE_TABLES.profiles).delete().eq("id", userId);
+  } else {
+    localStorage.removeItem(`${APP_STATE_PREFIX}${userId}`);
+  }
   showAdminNotice(`Deleted ${target.name}.`);
-  renderAdminPanel();
+  await renderAdminPanel();
 }
 
 function showAdminNotice(message) {
@@ -1427,7 +1618,7 @@ function getManagedProfiles() {
     email: user.email
   }));
 
-  if (localStorage.getItem(`${APP_STATE_PREFIX}${GUEST_USER_ID}`)) {
+  if (!isSupabaseEnabled && localStorage.getItem(`${APP_STATE_PREFIX}${GUEST_USER_ID}`)) {
     profiles.push({
       id: GUEST_USER_ID,
       name: "Guest",
@@ -2006,6 +2197,10 @@ function ensureDefaultAnnouncements() {
     return;
   }
 
+  if (isSupabaseEnabled) {
+    return;
+  }
+
   saveAnnouncements([
     {
       id: crypto.randomUUID(),
@@ -2017,7 +2212,223 @@ function ensureDefaultAnnouncements() {
   ]);
 }
 
+async function ensureSupabaseProfile(authUser, fallbackName) {
+  const email = normalizeEmail(authUser.email);
+  const fallback = String(
+    fallbackName
+      || authUser.user_metadata?.name
+      || authUser.user_metadata?.full_name
+      || email.split("@")[0]
+      || "Member"
+  ).trim();
+
+  const { data: existingProfile, error: selectError } = await supabaseClient
+    .from(SUPABASE_TABLES.profiles)
+    .select("*")
+    .eq("id", authUser.id)
+    .maybeSingle();
+
+  if (selectError) {
+    throw selectError;
+  }
+
+  const role = email === normalizeEmail(DEFAULT_ADMIN_ACCOUNT.email) ? "admin" : normalizeRole(existingProfile?.role);
+  const payload = {
+    id: authUser.id,
+    email,
+    name: existingProfile?.name || fallback.charAt(0).toUpperCase() + fallback.slice(1),
+    role
+  };
+
+  const { data: profile, error: upsertError } = await supabaseClient
+    .from(SUPABASE_TABLES.profiles)
+    .upsert(payload)
+    .select("*")
+    .single();
+
+  if (upsertError) {
+    throw upsertError;
+  }
+
+  return {
+    ...profile,
+    email: normalizeEmail(profile.email),
+    role: normalizeRole(profile.role)
+  };
+}
+
+async function fetchSupabaseUsers() {
+  const { data, error } = await supabaseClient
+    .from(SUPABASE_TABLES.profiles)
+    .select("*")
+    .order("name", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return Array.isArray(data)
+    ? data.map((user) => ({
+        ...user,
+        email: normalizeEmail(user.email),
+        role: normalizeRole(user.role)
+      }))
+    : [];
+}
+
+async function fetchSupabaseAnnouncements() {
+  const { data, error } = await supabaseClient
+    .from(SUPABASE_TABLES.announcements)
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return Array.isArray(data)
+    ? data.map((item) => ({
+        id: item.id,
+        title: item.title,
+        body: item.body,
+        createdAt: item.created_at,
+        author: item.author_name
+      }))
+    : [];
+}
+
+async function fetchSupabaseStateForUser(userId) {
+  const { data, error } = await supabaseClient
+    .from(SUPABASE_TABLES.studyStates)
+    .select("*")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  const hydratedState = data
+    ? {
+        completedReadings: data.completed_readings || {},
+        notes: Array.isArray(data.notes) ? data.notes : [],
+        reflections: Array.isArray(data.reflections) ? data.reflections : [],
+        prayers: Array.isArray(data.prayers) ? data.prayers : [],
+        bookmarks: Array.isArray(data.bookmarks) ? data.bookmarks : [],
+        studyDays: Array.isArray(data.study_days) ? data.study_days : [],
+        bibleReader: normalizeBibleReader(data.bible_reader)
+      }
+    : createDefaultState();
+
+  cachedStatesByUserId.set(userId, hydratedState);
+  return hydratedState;
+}
+
+async function hydrateSupabaseAdminCaches() {
+  cachedUsers = await fetchSupabaseUsers();
+
+  const { data, error } = await supabaseClient
+    .from(SUPABASE_TABLES.studyStates)
+    .select("*");
+
+  if (error) {
+    throw error;
+  }
+
+  cachedStatesByUserId.clear();
+  (data || []).forEach((item) => {
+    cachedStatesByUserId.set(item.user_id, {
+      completedReadings: item.completed_readings || {},
+      notes: Array.isArray(item.notes) ? item.notes : [],
+      reflections: Array.isArray(item.reflections) ? item.reflections : [],
+      prayers: Array.isArray(item.prayers) ? item.prayers : [],
+      bookmarks: Array.isArray(item.bookmarks) ? item.bookmarks : [],
+      studyDays: Array.isArray(item.study_days) ? item.study_days : [],
+      bibleReader: normalizeBibleReader(item.bible_reader)
+    });
+  });
+
+  cachedAnnouncements = await fetchSupabaseAnnouncements();
+}
+
+async function syncSupabaseUsers(users) {
+  const payload = users.map((user) => ({
+    id: user.id,
+    email: normalizeEmail(user.email),
+    name: user.name,
+    role: normalizeRole(user.role)
+  }));
+
+  const { error } = await supabaseClient
+    .from(SUPABASE_TABLES.profiles)
+    .upsert(payload);
+
+  if (error) {
+    showAdminNotice("Could not sync users to Supabase.");
+    return;
+  }
+
+  cachedUsers = await fetchSupabaseUsers();
+}
+
+async function syncSupabaseAnnouncements(announcements, removedIds = []) {
+  const payload = announcements.map((item) => ({
+    id: item.id,
+    title: item.title,
+    body: item.body,
+    author_name: item.author || "Pathlight Team",
+    created_by: currentUser?.id || null,
+    created_at: item.createdAt
+  }));
+
+  const { error: upsertError } = await supabaseClient
+    .from(SUPABASE_TABLES.announcements)
+    .upsert(payload);
+
+  if (upsertError) {
+    showAdminNotice("Could not sync announcements to Supabase.");
+    return;
+  }
+
+  if (removedIds.length) {
+    await supabaseClient.from(SUPABASE_TABLES.announcements).delete().in("id", removedIds);
+  }
+
+  cachedAnnouncements = await fetchSupabaseAnnouncements();
+}
+
+async function syncSupabaseStudyState(userId, userState) {
+  const payload = {
+    user_id: userId,
+    completed_readings: userState.completedReadings,
+    notes: userState.notes,
+    reflections: userState.reflections,
+    prayers: userState.prayers,
+    bookmarks: userState.bookmarks,
+    study_days: userState.studyDays,
+    bible_reader: normalizeBibleReader(userState.bibleReader)
+  };
+
+  const { error } = await supabaseClient
+    .from(SUPABASE_TABLES.studyStates)
+    .upsert(payload);
+
+  if (error) {
+    showAdminNotice("Could not sync study state to Supabase.");
+  }
+}
+
+function upsertCachedUser(users, user) {
+  const nextUsers = users.filter((item) => item.id !== user.id);
+  nextUsers.push(user);
+  return nextUsers.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 function loadUsers() {
+  if (isSupabaseEnabled) {
+    return cachedUsers.slice();
+  }
+
   try {
     const raw = localStorage.getItem(USERS_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
@@ -2038,10 +2449,24 @@ function loadUsers() {
 }
 
 function saveUsers(users) {
+  if (isSupabaseEnabled) {
+    cachedUsers = users.map((user) => ({
+      ...user,
+      email: normalizeEmail(user.email),
+      role: normalizeRole(user.role)
+    }));
+    void syncSupabaseUsers(cachedUsers);
+    return;
+  }
+
   localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
 }
 
 function loadAnnouncements() {
+  if (isSupabaseEnabled) {
+    return cachedAnnouncements.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  }
+
   try {
     const raw = localStorage.getItem(ANNOUNCEMENTS_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
@@ -2058,6 +2483,14 @@ function loadAnnouncements() {
 }
 
 function saveAnnouncements(announcements) {
+  if (isSupabaseEnabled) {
+    const previousIds = cachedAnnouncements.map((item) => item.id);
+    cachedAnnouncements = announcements.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const removedIds = previousIds.filter((id) => !cachedAnnouncements.some((item) => item.id === id));
+    void syncSupabaseAnnouncements(cachedAnnouncements, removedIds);
+    return;
+  }
+
   localStorage.setItem(ANNOUNCEMENTS_STORAGE_KEY, JSON.stringify(announcements));
 }
 
@@ -2067,6 +2500,9 @@ function findUserByEmail(email) {
 }
 
 function setSession(userId) {
+  if (isSupabaseEnabled) {
+    return;
+  }
   localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ userId }));
 }
 
@@ -2079,6 +2515,20 @@ function clearSession() {
 }
 
 function getSessionUser() {
+  if (isSupabaseEnabled) {
+    try {
+      const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed?.guest) {
+        return createGuestUser();
+      }
+    } catch (error) {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+    }
+
+    return cachedSessionUser;
+  }
+
   try {
     const raw = localStorage.getItem(SESSION_STORAGE_KEY);
     if (!raw) {
@@ -2101,6 +2551,12 @@ function getSessionUser() {
 }
 
 function loadStateForUser(userId) {
+  if (isSupabaseEnabled) {
+    return cachedStatesByUserId.get(userId)
+      ? JSON.parse(JSON.stringify(cachedStatesByUserId.get(userId)))
+      : createDefaultState();
+  }
+
   try {
     const raw = localStorage.getItem(`${APP_STATE_PREFIX}${userId}`);
     if (!raw) {
@@ -2123,11 +2579,23 @@ function loadStateForUser(userId) {
 }
 
 function saveStateForUser(userId, userState) {
+  if (isSupabaseEnabled) {
+    cachedStatesByUserId.set(userId, JSON.parse(JSON.stringify(userState)));
+    void syncSupabaseStudyState(userId, userState);
+    return;
+  }
+
   localStorage.setItem(`${APP_STATE_PREFIX}${userId}`, JSON.stringify(userState));
 }
 
 function saveState() {
   if (!currentUser) {
+    return;
+  }
+
+  if (isSupabaseEnabled) {
+    cachedStatesByUserId.set(currentUser.id, JSON.parse(JSON.stringify(state)));
+    void syncSupabaseStudyState(currentUser.id, state);
     return;
   }
 
