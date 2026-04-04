@@ -4,6 +4,10 @@ const path = require("path");
 
 const port = Number(process.env.PORT || 3000);
 const root = __dirname;
+const runtimeConfig = {
+  supabaseUrl: String(process.env.SUPABASE_URL || "").trim(),
+  supabaseAnonKey: String(process.env.SUPABASE_ANON_KEY || "").trim()
+};
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -37,8 +41,27 @@ function sendFile(res, filePath) {
   });
 }
 
+function sendRuntimeConfig(res) {
+  const payload = `window.PATHLIGHT_SUPABASE_CONFIG = Object.assign({}, window.PATHLIGHT_SUPABASE_CONFIG || {}, ${JSON.stringify({
+    url: runtimeConfig.supabaseUrl,
+    anonKey: runtimeConfig.supabaseAnonKey
+  })});`;
+
+  res.writeHead(200, {
+    "Content-Type": "text/javascript; charset=utf-8",
+    "Cache-Control": "no-store"
+  });
+  res.end(payload);
+}
+
 const server = http.createServer((req, res) => {
   const requestUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+
+  if (requestUrl.pathname === "/runtime-config.js") {
+    sendRuntimeConfig(res);
+    return;
+  }
+
   const requestPath = requestUrl.pathname === "/" ? "/index.html" : requestUrl.pathname;
   const safePath = path.normalize(requestPath).replace(/^\.\.(?:\\|\/|$)+/, "");
   const filePath = path.join(root, safePath);

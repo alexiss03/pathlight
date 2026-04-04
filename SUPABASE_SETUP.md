@@ -5,6 +5,12 @@
    - `anonKey`
 4. Open the app. If config is missing or the schema is not ready, Pathlight falls back to local storage.
 
+Render env option:
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+
+If these Render environment variables are set, they override [`supabase-config.js`](/Users/maryalexissolis/Documents/online-bible-study/supabase-config.js) at runtime.
+
 Default admin bootstrap:
 - Email: `admin@pathlight.local`
 - Password: `PathlightAdmin123!`
