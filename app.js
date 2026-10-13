@@ -2,6 +2,8 @@ const USERS_STORAGE_KEY = "pathlight-bible-users-v1";
 const SESSION_STORAGE_KEY = "pathlight-bible-session-v1";
 const APP_STATE_PREFIX = "pathlight-bible-state-v1:";
 const ANNOUNCEMENTS_STORAGE_KEY = "pathlight-bible-announcements-v1";
+const STUDY_CIRCLE_STORAGE_KEY = "pathlight-bible-study-circle-v1";
+const STUDY_CIRCLE_MEMBERS_STORAGE_KEY = "pathlight-bible-study-circle-members-v1";
 const GUEST_USER_ID = "guest-local";
 const BLOCKED_ACCOUNT_EMAILS = new Set(["a@a.com"]);
 const DEFAULT_ADMIN_ACCOUNT = {
@@ -28,7 +30,10 @@ const TRANSLATION_LABELS = {
 const SUPABASE_TABLES = {
   profiles: "profiles",
   studyStates: "study_states",
-  announcements: "announcements"
+  announcements: "announcements",
+  circlePosts: "study_circle_posts",
+  circlePrayers: "study_circle_prayers",
+  circleMembers: "study_circle_members"
 };
 
 const readingPlan = [
@@ -131,6 +136,12 @@ let isSupabaseEnabled = false;
 let cachedUsers = [];
 let cachedAnnouncements = [];
 let cachedSessionUser = null;
+let cachedStudyCirclePosts = [];
+let cachedStudyCirclePrayers = [];
+let cachedStudyCircleMembers = [];
+let studyCircleError = "";
+let supabaseStartupError = "";
+const isLocalDemo = ["localhost", "127.0.0.1", ""].includes(window.location.hostname);
 const cachedStatesByUserId = new Map();
 
 const els = {
@@ -162,14 +173,32 @@ const els = {
   adminTotalAdmins: document.getElementById("adminTotalAdmins"),
   adminTotalPrayers: document.getElementById("adminTotalPrayers"),
   adminTotalAnnouncements: document.getElementById("adminTotalAnnouncements"),
+  adminTotalCircleRequests: document.getElementById("adminTotalCircleRequests"),
   adminNotice: document.getElementById("adminNotice"),
   adminUsersList: document.getElementById("adminUsersList"),
   adminPrayerRequests: document.getElementById("adminPrayerRequests"),
+  adminCircleRequests: document.getElementById("adminCircleRequests"),
   announcementForm: document.getElementById("announcementForm"),
   announcementTitle: document.getElementById("announcementTitle"),
   announcementBody: document.getElementById("announcementBody"),
   adminAnnouncementsList: document.getElementById("adminAnnouncementsList"),
   dashboardAnnouncements: document.getElementById("dashboardAnnouncements"),
+  circleSummary: document.getElementById("circleSummary"),
+  circleMembershipStatus: document.getElementById("circleMembershipStatus"),
+  circleAccessActions: document.getElementById("circleAccessActions"),
+  requestCircleJoinBtn: document.getElementById("requestCircleJoinBtn"),
+  circleNotice: document.getElementById("circleNotice"),
+  circlePostForm: document.getElementById("circlePostForm"),
+  circlePostReference: document.getElementById("circlePostReference"),
+  circlePostTitle: document.getElementById("circlePostTitle"),
+  circlePostBody: document.getElementById("circlePostBody"),
+  circlePostSubmit: document.getElementById("circlePostSubmit"),
+  circlePrayerForm: document.getElementById("circlePrayerForm"),
+  circlePrayerCategory: document.getElementById("circlePrayerCategory"),
+  circlePrayerText: document.getElementById("circlePrayerText"),
+  circlePrayerSubmit: document.getElementById("circlePrayerSubmit"),
+  circleFeedList: document.getElementById("circleFeedList"),
+  circlePrayerList: document.getElementById("circlePrayerList"),
   faqList: document.getElementById("faqList"),
   streakCount: document.getElementById("streakCount"),
   progressCount: document.getElementById("progressCount"),
@@ -273,6 +302,7 @@ async function hydrateSupabaseBootstrap() {
   const profile = await ensureSupabaseProfile(authUser);
   cachedSessionUser = profile;
   cachedUsers = upsertCachedUser(cachedUsers, profile);
+  await fetchSupabaseStudyCircleMembershipForUser(authUser.id);
   await fetchSupabaseStateForUser(authUser.id);
 }
 
@@ -289,16 +319,14 @@ async function initialize() {
       await hydrateSupabaseBootstrap();
       ensureDefaultAnnouncements();
     } catch (error) {
-      isSupabaseEnabled = false;
-      supabaseClient = null;
+      supabaseStartupError = "Could not connect to your saved account. Check the database setup and try again.";
       cachedUsers = [];
       cachedAnnouncements = [];
       cachedSessionUser = null;
+      cachedStudyCirclePosts = [];
+      cachedStudyCirclePrayers = [];
+      cachedStudyCircleMembers = [];
       cachedStatesByUserId.clear();
-      removeBlockedAccounts();
-      ensureDefaultAdminAccount();
-      ensureAdminPresence();
-      ensureDefaultAnnouncements();
     }
   }
 
@@ -433,8 +461,17 @@ function bindAuth() {
     const email = normalizeEmail(els.loginEmail.value);
     const password = els.loginPassword.value;
 
+    if (supabaseStartupError || (!isSupabaseEnabled && !isLocalDemo)) {
+      showAuthMessage(supabaseStartupError || "Account login is unavailable until the service is configured.", true);
+      return;
+    }
+
     if (isSupabaseEnabled) {
-      await handleSupabaseLogin(email, password);
+      try {
+        await handleSupabaseLogin(email, password);
+      } catch (error) {
+        showAuthMessage("Could not load your account. Check the database setup and try again.", true);
+      }
       return;
     }
 
@@ -474,6 +511,11 @@ function bindAuth() {
   els.signupForm.addEventListener("submit", async (event) => {
     event.preventDefault();
 
+    if (supabaseStartupError || (!isSupabaseEnabled && !isLocalDemo)) {
+      showAuthMessage(supabaseStartupError || "Account signup is unavailable until the service is configured.", true);
+      return;
+    }
+
     if (isAdminContextRoute) {
       showAuthMessage("Sign up from the main app page. Admin login is separate.", true);
       return;
@@ -511,7 +553,11 @@ function bindAuth() {
     }
 
     if (isSupabaseEnabled) {
-      await handleSupabaseSignup({ name, email, password });
+      try {
+        await handleSupabaseSignup({ name, email, password });
+      } catch (error) {
+        showAuthMessage("Could not finish account setup. Check the database setup and try again.", true);
+      }
       return;
     }
 
@@ -571,6 +617,27 @@ function bindAdmin() {
 
       if (deleteTargetId) {
         deleteUser(deleteTargetId);
+      }
+    });
+  }
+
+  if (els.adminCircleRequests) {
+    els.adminCircleRequests.addEventListener("click", async (event) => {
+      const button = event.target.closest("button");
+      if (!button || !isCurrentUserAdmin()) {
+        return;
+      }
+
+      const approveUserId = button.dataset.approveCircleUserId;
+      const rejectUserId = button.dataset.rejectCircleUserId;
+
+      if (approveUserId) {
+        await updateStudyCircleMembership(approveUserId, "approved");
+        return;
+      }
+
+      if (rejectUserId) {
+        await updateStudyCircleMembership(rejectUserId, "rejected");
       }
     });
   }
@@ -640,6 +707,12 @@ function bindAdmin() {
       }
 
       deleteAnnouncement(announcementId);
+    });
+  }
+
+  if (els.requestCircleJoinBtn) {
+    els.requestCircleJoinBtn.addEventListener("click", async () => {
+      await requestStudyCircleJoin();
     });
   }
 }
@@ -768,23 +841,7 @@ function activateGuestSession() {
 }
 
 async function handleSupabaseLogin(email, password) {
-  let loginResult = await supabaseClient.auth.signInWithPassword({ email, password });
-
-  if (loginResult.error && email === normalizeEmail(DEFAULT_ADMIN_ACCOUNT.email) && password === DEFAULT_ADMIN_ACCOUNT.password) {
-    const signUpResult = await supabaseClient.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          name: DEFAULT_ADMIN_ACCOUNT.name
-        }
-      }
-    });
-
-    if (!signUpResult.error) {
-      loginResult = await supabaseClient.auth.signInWithPassword({ email, password });
-    }
-  }
+  const loginResult = await supabaseClient.auth.signInWithPassword({ email, password });
 
   if (loginResult.error) {
     showAuthMessage(loginResult.error.message || "Unable to log in right now.", true);
@@ -865,6 +922,16 @@ async function activateUserSession(user) {
   if (isSupabaseEnabled) {
     cachedSessionUser = currentUser;
     localStorage.removeItem(SESSION_STORAGE_KEY);
+    try {
+      await hydrateSupabaseCircleMemberships(isCurrentUserAdmin());
+      await hydrateSupabaseStudyCircle();
+      studyCircleError = "";
+    } catch (error) {
+      cachedStudyCircleMembers = [];
+      cachedStudyCirclePosts = [];
+      cachedStudyCirclePrayers = [];
+      studyCircleError = "Study Circle is unavailable. Please ask the administrator to complete its setup.";
+    }
   } else {
     setSession(user.id);
   }
@@ -975,6 +1042,75 @@ function bindForms() {
     els.reflectionForm.reset();
     renderAll();
   });
+
+  if (els.circlePostForm) {
+    els.circlePostForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      if (!canShareToCircle()) {
+        showCircleNotice("Create an account to share with the Study Circle.", true);
+        return;
+      }
+
+      const title = els.circlePostTitle.value.trim();
+      const body = els.circlePostBody.value.trim();
+      const reference = els.circlePostReference.value.trim();
+
+      if (!title || !body) {
+        showCircleNotice("A title and message are required to share with the circle.", true);
+        return;
+      }
+
+      const success = await createStudyCirclePost({
+        reference,
+        title,
+        body
+      });
+
+      if (!success) {
+        return;
+      }
+
+      recordStudyDay();
+      saveState();
+      els.circlePostForm.reset();
+      showCircleNotice("Shared with the Study Circle.", false);
+      renderAll();
+    });
+  }
+
+  if (els.circlePrayerForm) {
+    els.circlePrayerForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      if (!canShareToCircle()) {
+        showCircleNotice("Create an account to share prayer requests with the Study Circle.", true);
+        return;
+      }
+
+      const category = els.circlePrayerCategory.value;
+      const text = els.circlePrayerText.value.trim();
+      if (!text) {
+        showCircleNotice("Write a prayer request before posting it to the circle.", true);
+        return;
+      }
+
+      const success = await createStudyCirclePrayer({
+        category,
+        text
+      });
+
+      if (!success) {
+        return;
+      }
+
+      recordStudyDay();
+      saveState();
+      els.circlePrayerForm.reset();
+      showCircleNotice("Prayer request shared with the circle.", false);
+      renderAll();
+    });
+  }
 }
 
 function bindDashboardActions() {
@@ -1049,6 +1185,7 @@ function renderAll() {
   renderNextReading();
   renderLatestReflection();
   renderDashboardAnnouncements();
+  renderStudyCircle();
   renderBookmarks();
   renderReadingPlan();
   renderVerseResults(els.verseSearch.value.trim().toLowerCase());
@@ -1206,6 +1343,520 @@ function renderDashboardAnnouncements() {
       `;
     })
     .join("");
+}
+
+function renderStudyCircle() {
+  if (!els.circleSummary || !els.circleFeedList || !els.circlePrayerList) {
+    return;
+  }
+
+  const posts = loadStudyCirclePosts();
+  const prayers = loadStudyCirclePrayers();
+  const membership = getCurrentStudyCircleMembership();
+  const hasAccess = hasStudyCircleAccess(membership);
+  const canRequestJoin = canRequestStudyCircleJoin(membership);
+  const activeMembers = new Set(
+    [...posts, ...prayers]
+      .map((item) => item.authorId)
+      .filter(Boolean)
+  );
+
+  if (currentUser && !currentUser.isGuest) {
+    activeMembers.add(currentUser.id);
+  }
+
+  els.circleSummary.innerHTML = [
+    `<span class="chip">${posts.length} ${posts.length === 1 ? "share" : "shares"}</span>`,
+    `<span class="chip">${prayers.length} prayer ${prayers.length === 1 ? "request" : "requests"}</span>`,
+    `<span class="chip">${activeMembers.size} active ${activeMembers.size === 1 ? "member" : "members"}</span>`
+  ].join("");
+
+  const circleLocked = !hasAccess;
+  setCircleFormState(circleLocked);
+  renderCircleMembershipState(membership, canRequestJoin);
+
+  if (studyCircleError) {
+    setCircleFormState(true);
+    els.circleAccessActions.classList.add("is-hidden");
+    els.circleFeedList.textContent = studyCircleError;
+    els.circlePrayerList.textContent = studyCircleError;
+    return;
+  }
+
+  if (!hasAccess) {
+    const lockedMessage = getCircleLockedMessage(membership);
+    els.circleFeedList.innerHTML = `<p class="empty">${escapeHtml(lockedMessage)}</p>`;
+    els.circlePrayerList.innerHTML = `<p class="empty">${escapeHtml(lockedMessage)}</p>`;
+    return;
+  }
+
+  if (!posts.length) {
+    els.circleFeedList.innerHTML = '<p class="empty">No one has shared in the circle yet. Be the first to post an insight.</p>';
+  } else {
+    els.circleFeedList.innerHTML = posts
+      .map((post) => {
+        const created = new Date(post.createdAt).toLocaleDateString();
+        const canManage = canManageCircleItem(post.authorId);
+        return `
+          <article class="entry">
+            <h4>${escapeHtml(post.title)}</h4>
+            <p class="meta">${escapeHtml(post.reference || "General encouragement")} - ${escapeHtml(post.authorName)} - ${escapeHtml(created)}</p>
+            <p>${escapeHtml(post.body)}</p>
+            ${canManage ? `
+              <div class="entry-actions">
+                <button class="small-btn danger" type="button" data-delete-circle-post="${post.id}">Delete</button>
+              </div>
+            ` : ""}
+          </article>
+        `;
+      })
+      .join("");
+  }
+
+  if (!prayers.length) {
+    els.circlePrayerList.innerHTML = '<p class="empty">No shared prayer requests yet. Post one for the circle to pray over.</p>';
+  } else {
+    els.circlePrayerList.innerHTML = prayers
+      .map((prayer) => {
+        const created = new Date(prayer.createdAt).toLocaleDateString();
+        const canManage = canManageCircleItem(prayer.authorId);
+        return `
+          <article class="entry">
+            <p class="meta">${escapeHtml(prayer.category)} - ${escapeHtml(prayer.authorName)} - ${escapeHtml(created)}</p>
+            <p class="${prayer.answered ? "prayer-done" : ""}">${escapeHtml(prayer.text)}</p>
+            <div class="entry-actions">
+              ${canManage ? `
+                <button class="small-btn ok" type="button" data-toggle-circle-prayer="${prayer.id}">
+                  ${prayer.answered ? "Mark Unanswered" : "Mark Answered"}
+                </button>
+                <button class="small-btn danger" type="button" data-delete-circle-prayer="${prayer.id}">Delete</button>
+              ` : ""}
+            </div>
+          </article>
+        `;
+      })
+      .join("");
+  }
+
+  els.circleFeedList.querySelectorAll("[data-delete-circle-post]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await deleteStudyCirclePost(button.dataset.deleteCirclePost);
+    });
+  });
+
+  els.circlePrayerList.querySelectorAll("[data-toggle-circle-prayer]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await toggleStudyCirclePrayerAnswered(button.dataset.toggleCirclePrayer);
+    });
+  });
+
+  els.circlePrayerList.querySelectorAll("[data-delete-circle-prayer]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      await deleteStudyCirclePrayer(button.dataset.deleteCirclePrayer);
+    });
+  });
+}
+
+function setCircleFormState(disabled) {
+  const formElements = [
+    els.circlePostReference,
+    els.circlePostTitle,
+    els.circlePostBody,
+    els.circlePostSubmit,
+    els.circlePrayerCategory,
+    els.circlePrayerText,
+    els.circlePrayerSubmit
+  ];
+
+  formElements.forEach((element) => {
+    if (element) {
+      element.disabled = disabled;
+    }
+  });
+
+  if (!disabled && els.circleNotice.textContent === "Guest mode can browse the Study Circle, but sharing requires an account.") {
+    showCircleNotice("", false);
+  }
+}
+
+function renderCircleMembershipState(membership, canRequestJoin) {
+  if (els.circleMembershipStatus) {
+    if (!currentUser || currentUser.isGuest) {
+      els.circleMembershipStatus.textContent = "Create an account, then ask to join before viewing Study Circle prayers and reflections.";
+    } else if (isCurrentUserAdmin()) {
+      els.circleMembershipStatus.textContent = "Admin access: you can view and manage the Study Circle immediately.";
+    } else if (membership?.status === "approved") {
+      els.circleMembershipStatus.textContent = "You are an approved Study Circle member.";
+    } else if (membership?.status === "pending") {
+      els.circleMembershipStatus.textContent = "Your request to join is pending admin approval.";
+    } else if (membership?.status === "rejected") {
+      els.circleMembershipStatus.textContent = "Your last request was declined. You can send another request.";
+    } else {
+      els.circleMembershipStatus.textContent = "Ask to join first to read the Study Circle prayer list and shared posts.";
+    }
+  }
+
+  if (els.circleAccessActions && els.requestCircleJoinBtn) {
+    const hidden = !canRequestJoin;
+    els.circleAccessActions.classList.toggle("is-hidden", hidden);
+    els.requestCircleJoinBtn.disabled = hidden;
+  }
+}
+
+function getCircleLockedMessage(membership) {
+  if (!currentUser || currentUser.isGuest) {
+    return "Create an account and ask to join the Study Circle to view the prayer list and shared posts.";
+  }
+
+  if (membership?.status === "pending") {
+    return "Your Study Circle request is pending. An admin must approve it before you can view the circle prayers and feed.";
+  }
+
+  if (membership?.status === "rejected") {
+    return "Your last Study Circle request was declined. You can send another request when you're ready.";
+  }
+
+  return "Ask to join the Study Circle first. Once approved, you'll be able to read the prayer list and community posts.";
+}
+
+function showCircleNotice(message, isError) {
+  if (!els.circleNotice) {
+    return;
+  }
+
+  els.circleNotice.textContent = message;
+  els.circleNotice.classList.toggle("error", Boolean(isError && message));
+  els.circleNotice.classList.toggle("success", Boolean(!isError && message));
+}
+
+function canShareToCircle() {
+  return hasStudyCircleAccess(getCurrentStudyCircleMembership());
+}
+
+function canManageCircleItem(authorId) {
+  if (!currentUser || currentUser.isGuest) {
+    return false;
+  }
+
+  return isCurrentUserAdmin() || currentUser.id === authorId;
+}
+
+function hasStudyCircleAccess(membership = getCurrentStudyCircleMembership()) {
+  if (!currentUser || currentUser.isGuest) {
+    return false;
+  }
+
+  return isCurrentUserAdmin() || membership?.status === "approved";
+}
+
+function canRequestStudyCircleJoin(membership = getCurrentStudyCircleMembership()) {
+  if (!currentUser || currentUser.isGuest || isCurrentUserAdmin()) {
+    return false;
+  }
+
+  return membership?.status !== "pending" && membership?.status !== "approved";
+}
+
+function normalizeStudyCircleMembershipStatus(status) {
+  return status === "approved" || status === "rejected" ? status : "pending";
+}
+
+function getCurrentStudyCircleMembership() {
+  if (!currentUser || currentUser.isGuest) {
+    return null;
+  }
+
+  return getStudyCircleMembershipForUser(currentUser.id);
+}
+
+async function requestStudyCircleJoin() {
+  if (!currentUser || currentUser.isGuest) {
+    showCircleNotice("Create an account first, then request access to the Study Circle.", true);
+    return;
+  }
+
+  if (isCurrentUserAdmin()) {
+    showCircleNotice("Admins already have access to the Study Circle.", false);
+    return;
+  }
+
+  const membership = getCurrentStudyCircleMembership();
+  if (membership?.status === "approved") {
+    showCircleNotice("You are already approved for the Study Circle.", false);
+    return;
+  }
+
+  if (membership?.status === "pending") {
+    showCircleNotice("Your Study Circle request is already pending approval.", false);
+    return;
+  }
+
+  const request = {
+    userId: currentUser.id,
+    userName: currentUser.name,
+    userEmail: currentUser.email,
+    status: "pending",
+    requestedAt: new Date().toISOString(),
+    approvedAt: null,
+    approvedBy: null
+  };
+
+  if (isSupabaseEnabled) {
+    const { error } = await supabaseClient
+      .from(SUPABASE_TABLES.circleMembers)
+      .upsert({
+        user_id: request.userId,
+        user_name: request.userName,
+        user_email: request.userEmail,
+        status: request.status,
+        requested_at: request.requestedAt,
+        approved_at: null,
+        approved_by: null
+      });
+
+    if (error) {
+      showCircleNotice("Could not send your Study Circle request right now.", true);
+      return;
+    }
+
+    await fetchSupabaseStudyCircleMembershipForUser(request.userId);
+  } else {
+    const memberships = loadLocalStudyCircleMemberships();
+    const nextMemberships = memberships.filter((item) => item.userId !== request.userId);
+    nextMemberships.push(request);
+    saveLocalStudyCircleMemberships(nextMemberships);
+  }
+
+  showCircleNotice("Your request to join the Study Circle has been sent.", false);
+  renderStudyCircle();
+}
+
+async function updateStudyCircleMembership(userId, status) {
+  const normalizedStatus = normalizeStudyCircleMembershipStatus(status);
+  const targetUser = loadUsers().find((user) => user.id === userId);
+  if (!targetUser) {
+    showAdminNotice("Study Circle request user no longer exists.");
+    return;
+  }
+
+  const payload = {
+    userId,
+    userName: targetUser.name,
+    userEmail: targetUser.email,
+    status: normalizedStatus,
+    requestedAt: getStudyCircleMembershipForUser(userId)?.requestedAt || new Date().toISOString(),
+    approvedAt: normalizedStatus === "approved" ? new Date().toISOString() : null,
+    approvedBy: currentUser?.id || null
+  };
+
+  if (isSupabaseEnabled) {
+    const { error } = await supabaseClient
+      .from(SUPABASE_TABLES.circleMembers)
+      .upsert({
+        user_id: payload.userId,
+        user_name: payload.userName,
+        user_email: payload.userEmail,
+        status: payload.status,
+        requested_at: payload.requestedAt,
+        approved_at: payload.approvedAt,
+        approved_by: payload.approvedBy
+      });
+
+    if (error) {
+      showAdminNotice("Could not update the Study Circle request.");
+      return;
+    }
+
+    await hydrateSupabaseCircleMemberships(true);
+  } else {
+    const memberships = loadLocalStudyCircleMemberships();
+    const nextMemberships = memberships.filter((item) => item.userId !== userId);
+    nextMemberships.push(payload);
+    saveLocalStudyCircleMemberships(nextMemberships);
+  }
+
+  if (currentUser && currentUser.id === userId) {
+    showCircleNotice(
+      normalizedStatus === "approved"
+        ? "Your Study Circle request was approved."
+        : "Your Study Circle request was declined.",
+      false
+    );
+  }
+
+  showAdminNotice(
+    normalizedStatus === "approved"
+      ? `${targetUser.name} was approved for the Study Circle.`
+      : `${targetUser.name}'s Study Circle request was declined.`
+  );
+  renderStudyCircle();
+  await renderAdminPanel();
+}
+
+async function createStudyCirclePost({ reference, title, body }) {
+  const post = {
+    id: crypto.randomUUID(),
+    authorId: currentUser.id,
+    authorName: currentUser.name,
+    reference,
+    title,
+    body,
+    createdAt: new Date().toISOString()
+  };
+
+  if (isSupabaseEnabled) {
+    const { error } = await supabaseClient
+      .from(SUPABASE_TABLES.circlePosts)
+      .insert({
+        id: post.id,
+        author_id: post.authorId,
+        author_name: post.authorName,
+        reference: post.reference,
+        title: post.title,
+        body: post.body,
+        created_at: post.createdAt
+      });
+
+    if (error) {
+      showCircleNotice("Could not post to the Study Circle right now.", true);
+      return false;
+    }
+
+    cachedStudyCirclePosts = await fetchSupabaseStudyCirclePosts();
+    return true;
+  }
+
+  const store = loadLocalStudyCircleStore();
+  store.posts.unshift(post);
+  saveLocalStudyCircleStore(store);
+  return true;
+}
+
+async function createStudyCirclePrayer({ category, text }) {
+  const prayer = {
+    id: crypto.randomUUID(),
+    authorId: currentUser.id,
+    authorName: currentUser.name,
+    category,
+    text,
+    answered: false,
+    createdAt: new Date().toISOString()
+  };
+
+  if (isSupabaseEnabled) {
+    const { error } = await supabaseClient
+      .from(SUPABASE_TABLES.circlePrayers)
+      .insert({
+        id: prayer.id,
+        author_id: prayer.authorId,
+        author_name: prayer.authorName,
+        category: prayer.category,
+        text: prayer.text,
+        answered: prayer.answered,
+        created_at: prayer.createdAt
+      });
+
+    if (error) {
+      showCircleNotice("Could not share the prayer request right now.", true);
+      return false;
+    }
+
+    cachedStudyCirclePrayers = await fetchSupabaseStudyCirclePrayers();
+    return true;
+  }
+
+  const store = loadLocalStudyCircleStore();
+  store.prayers.unshift(prayer);
+  saveLocalStudyCircleStore(store);
+  return true;
+}
+
+async function deleteStudyCirclePost(postId) {
+  const target = loadStudyCirclePosts().find((item) => item.id === postId);
+  if (!target || !canManageCircleItem(target.authorId)) {
+    return;
+  }
+
+  if (isSupabaseEnabled) {
+    const { error } = await supabaseClient
+      .from(SUPABASE_TABLES.circlePosts)
+      .delete()
+      .eq("id", postId);
+
+    if (error) {
+      showCircleNotice("Could not delete that circle post.", true);
+      return;
+    }
+
+    cachedStudyCirclePosts = await fetchSupabaseStudyCirclePosts();
+  } else {
+    const store = loadLocalStudyCircleStore();
+    store.posts = store.posts.filter((item) => item.id !== postId);
+    saveLocalStudyCircleStore(store);
+  }
+
+  showCircleNotice("Post removed from the Study Circle.", false);
+  renderStudyCircle();
+}
+
+async function toggleStudyCirclePrayerAnswered(prayerId) {
+  const target = loadStudyCirclePrayers().find((item) => item.id === prayerId);
+  if (!target || !canManageCircleItem(target.authorId)) {
+    return;
+  }
+
+  const nextAnswered = !target.answered;
+
+  if (isSupabaseEnabled) {
+    const { error } = await supabaseClient
+      .from(SUPABASE_TABLES.circlePrayers)
+      .update({ answered: nextAnswered })
+      .eq("id", prayerId);
+
+    if (error) {
+      showCircleNotice("Could not update that prayer request.", true);
+      return;
+    }
+
+    cachedStudyCirclePrayers = await fetchSupabaseStudyCirclePrayers();
+  } else {
+    const store = loadLocalStudyCircleStore();
+    store.prayers = store.prayers.map((item) => (
+      item.id === prayerId ? { ...item, answered: nextAnswered } : item
+    ));
+    saveLocalStudyCircleStore(store);
+  }
+
+  showCircleNotice(nextAnswered ? "Prayer marked answered." : "Prayer marked unanswered.", false);
+  renderStudyCircle();
+}
+
+async function deleteStudyCirclePrayer(prayerId) {
+  const target = loadStudyCirclePrayers().find((item) => item.id === prayerId);
+  if (!target || !canManageCircleItem(target.authorId)) {
+    return;
+  }
+
+  if (isSupabaseEnabled) {
+    const { error } = await supabaseClient
+      .from(SUPABASE_TABLES.circlePrayers)
+      .delete()
+      .eq("id", prayerId);
+
+    if (error) {
+      showCircleNotice("Could not delete that prayer request.", true);
+      return;
+    }
+
+    cachedStudyCirclePrayers = await fetchSupabaseStudyCirclePrayers();
+  } else {
+    const store = loadLocalStudyCircleStore();
+    store.prayers = store.prayers.filter((item) => item.id !== prayerId);
+    saveLocalStudyCircleStore(store);
+  }
+
+  showCircleNotice("Prayer request removed from the circle.", false);
+  renderStudyCircle();
 }
 
 function renderReadingPlan() {
@@ -1451,6 +2102,8 @@ async function renderAdminPanel() {
   const adminsCount = countAdmins(users);
   const allPrayerRequests = getAllPrayerRequests();
   const announcements = loadAnnouncements();
+  const circleMemberships = loadStudyCircleMemberships();
+  const pendingCircleRequests = circleMemberships.filter((item) => item.status === "pending");
 
   els.adminTotalUsers.textContent = `Total users: ${users.length}`;
   els.adminTotalAdmins.textContent = `Admins: ${adminsCount}`;
@@ -1459,6 +2112,9 @@ async function renderAdminPanel() {
   }
   if (els.adminTotalAnnouncements) {
     els.adminTotalAnnouncements.textContent = `Announcements: ${announcements.length}`;
+  }
+  if (els.adminTotalCircleRequests) {
+    els.adminTotalCircleRequests.textContent = `Circle requests: ${pendingCircleRequests.length}`;
   }
 
   if (!users.length) {
@@ -1547,6 +2203,28 @@ async function renderAdminPanel() {
         .join("");
     }
   }
+
+  if (els.adminCircleRequests) {
+    if (!pendingCircleRequests.length) {
+      els.adminCircleRequests.innerHTML = '<p class="empty">No pending Study Circle requests.</p>';
+    } else {
+      els.adminCircleRequests.innerHTML = pendingCircleRequests
+        .map((item) => {
+          const requested = new Date(item.requestedAt).toLocaleDateString();
+          return `
+            <article class="entry">
+              <h4>${escapeHtml(item.userName || item.userEmail)}</h4>
+              <p class="meta">${escapeHtml(item.userEmail)} - Requested ${escapeHtml(requested)}</p>
+              <div class="entry-actions">
+                <button class="small-btn ok" type="button" data-approve-circle-user-id="${item.userId}">Approve</button>
+                <button class="small-btn danger" type="button" data-reject-circle-user-id="${item.userId}">Decline</button>
+              </div>
+            </article>
+          `;
+        })
+        .join("");
+    }
+  }
 }
 
 async function toggleUserRole(userId) {
@@ -1597,9 +2275,20 @@ async function deleteUser(userId) {
   if (isSupabaseEnabled) {
     cachedStatesByUserId.delete(userId);
     await supabaseClient.from(SUPABASE_TABLES.studyStates).delete().eq("user_id", userId);
+    await supabaseClient.from(SUPABASE_TABLES.circlePosts).delete().eq("author_id", userId);
+    await supabaseClient.from(SUPABASE_TABLES.circlePrayers).delete().eq("author_id", userId);
+    await supabaseClient.from(SUPABASE_TABLES.circleMembers).delete().eq("user_id", userId);
     await supabaseClient.from(SUPABASE_TABLES.profiles).delete().eq("id", userId);
+    await hydrateSupabaseStudyCircle();
+    await hydrateSupabaseCircleMemberships(true);
   } else {
     localStorage.removeItem(`${APP_STATE_PREFIX}${userId}`);
+    const store = loadLocalStudyCircleStore();
+    store.posts = store.posts.filter((item) => item.authorId !== userId);
+    store.prayers = store.prayers.filter((item) => item.authorId !== userId);
+    saveLocalStudyCircleStore(store);
+    const memberships = loadLocalStudyCircleMemberships().filter((item) => item.userId !== userId);
+    saveLocalStudyCircleMemberships(memberships);
   }
   showAdminNotice(`Deleted ${target.name}.`);
   await renderAdminPanel();
@@ -2232,7 +2921,7 @@ async function ensureSupabaseProfile(authUser, fallbackName) {
     throw selectError;
   }
 
-  const role = email === normalizeEmail(DEFAULT_ADMIN_ACCOUNT.email) ? "admin" : normalizeRole(existingProfile?.role);
+  const role = normalizeRole(existingProfile?.role);
   const payload = {
     id: authUser.id,
     email,
@@ -2297,6 +2986,127 @@ async function fetchSupabaseAnnouncements() {
     : [];
 }
 
+async function fetchSupabaseStudyCirclePosts() {
+  const { data, error } = await supabaseClient
+    .from(SUPABASE_TABLES.circlePosts)
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return Array.isArray(data)
+    ? data.map((item) => ({
+        id: item.id,
+        authorId: item.author_id,
+        authorName: item.author_name || "Pathlight Member",
+        reference: item.reference || "",
+        title: item.title,
+        body: item.body,
+        createdAt: item.created_at
+      }))
+    : [];
+}
+
+async function fetchSupabaseStudyCirclePrayers() {
+  const { data, error } = await supabaseClient
+    .from(SUPABASE_TABLES.circlePrayers)
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return Array.isArray(data)
+    ? data.map((item) => ({
+        id: item.id,
+        authorId: item.author_id,
+        authorName: item.author_name || "Pathlight Member",
+        category: item.category || "Personal",
+        text: item.text,
+        answered: Boolean(item.answered),
+        createdAt: item.created_at
+      }))
+    : [];
+}
+
+async function fetchSupabaseStudyCircleMembershipForUser(userId) {
+  const { data, error } = await supabaseClient
+    .from(SUPABASE_TABLES.circleMembers)
+    .select("*")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  const nextMemberships = cachedStudyCircleMembers.filter((item) => item.userId !== userId);
+  if (data) {
+    nextMemberships.push({
+      userId: data.user_id,
+      userName: data.user_name || "",
+      userEmail: normalizeEmail(data.user_email || ""),
+      status: normalizeStudyCircleMembershipStatus(data.status),
+      requestedAt: data.requested_at,
+      approvedAt: data.approved_at,
+      approvedBy: data.approved_by
+    });
+  }
+  cachedStudyCircleMembers = nextMemberships;
+
+  return data || null;
+}
+
+async function fetchSupabaseStudyCircleMemberships() {
+  const { data, error } = await supabaseClient
+    .from(SUPABASE_TABLES.circleMembers)
+    .select("*")
+    .order("requested_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return Array.isArray(data)
+    ? data.map((item) => ({
+        userId: item.user_id,
+        userName: item.user_name || "",
+        userEmail: normalizeEmail(item.user_email || ""),
+        status: normalizeStudyCircleMembershipStatus(item.status),
+        requestedAt: item.requested_at,
+        approvedAt: item.approved_at,
+        approvedBy: item.approved_by
+      }))
+    : [];
+}
+
+async function hydrateSupabaseCircleMemberships(adminScope = false) {
+  if (!supabaseClient) {
+    cachedStudyCircleMembers = [];
+    return;
+  }
+
+  if (adminScope && isCurrentUserAdmin()) {
+    cachedStudyCircleMembers = await fetchSupabaseStudyCircleMemberships();
+    return;
+  }
+
+  if (!currentUser || currentUser.isGuest) {
+    cachedStudyCircleMembers = [];
+    return;
+  }
+
+  await fetchSupabaseStudyCircleMembershipForUser(currentUser.id);
+}
+
+async function hydrateSupabaseStudyCircle() {
+  cachedStudyCirclePosts = await fetchSupabaseStudyCirclePosts();
+  cachedStudyCirclePrayers = await fetchSupabaseStudyCirclePrayers();
+}
+
 async function fetchSupabaseStateForUser(userId) {
   const { data, error } = await supabaseClient
     .from(SUPABASE_TABLES.studyStates)
@@ -2349,6 +3159,7 @@ async function hydrateSupabaseAdminCaches() {
   });
 
   cachedAnnouncements = await fetchSupabaseAnnouncements();
+  cachedStudyCircleMembers = await fetchSupabaseStudyCircleMemberships();
 }
 
 async function syncSupabaseUsers(users) {
@@ -2492,6 +3303,117 @@ function saveAnnouncements(announcements) {
   }
 
   localStorage.setItem(ANNOUNCEMENTS_STORAGE_KEY, JSON.stringify(announcements));
+}
+
+function createDefaultStudyCircleStore() {
+  return {
+    posts: [],
+    prayers: []
+  };
+}
+
+function loadLocalStudyCircleMemberships() {
+  try {
+    const raw = localStorage.getItem(STUDY_CIRCLE_MEMBERS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .filter((item) => item && item.userId && item.userEmail)
+      .map((item) => ({
+        userId: item.userId,
+        userName: item.userName || "",
+        userEmail: normalizeEmail(item.userEmail),
+        status: normalizeStudyCircleMembershipStatus(item.status),
+        requestedAt: item.requestedAt || new Date().toISOString(),
+        approvedAt: item.approvedAt || null,
+        approvedBy: item.approvedBy || null
+      }))
+      .sort((a, b) => new Date(b.requestedAt) - new Date(a.requestedAt));
+  } catch (error) {
+    return [];
+  }
+}
+
+function saveLocalStudyCircleMemberships(memberships) {
+  localStorage.setItem(STUDY_CIRCLE_MEMBERS_STORAGE_KEY, JSON.stringify(memberships));
+}
+
+function loadLocalStudyCircleStore() {
+  try {
+    const raw = localStorage.getItem(STUDY_CIRCLE_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : createDefaultStudyCircleStore();
+    const posts = Array.isArray(parsed.posts)
+      ? parsed.posts
+        .filter((item) => item && item.id && item.title && item.body && item.createdAt)
+        .map((item) => ({
+          id: item.id,
+          authorId: item.authorId || "",
+          authorName: item.authorName || "Pathlight Member",
+          reference: item.reference || "",
+          title: item.title,
+          body: item.body,
+          createdAt: item.createdAt
+        }))
+      : [];
+    const prayers = Array.isArray(parsed.prayers)
+      ? parsed.prayers
+        .filter((item) => item && item.id && item.text && item.createdAt)
+        .map((item) => ({
+          id: item.id,
+          authorId: item.authorId || "",
+          authorName: item.authorName || "Pathlight Member",
+          category: item.category || "Personal",
+          text: item.text,
+          answered: Boolean(item.answered),
+          createdAt: item.createdAt
+        }))
+      : [];
+
+    return {
+      posts: posts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)),
+      prayers: prayers.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    };
+  } catch (error) {
+    return createDefaultStudyCircleStore();
+  }
+}
+
+function saveLocalStudyCircleStore(store) {
+  localStorage.setItem(STUDY_CIRCLE_STORAGE_KEY, JSON.stringify({
+    posts: store.posts,
+    prayers: store.prayers
+  }));
+}
+
+function loadStudyCirclePosts() {
+  if (isSupabaseEnabled) {
+    return cachedStudyCirclePosts.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  }
+
+  return loadLocalStudyCircleStore().posts;
+}
+
+function loadStudyCirclePrayers() {
+  if (isSupabaseEnabled) {
+    return cachedStudyCirclePrayers.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  }
+
+  return loadLocalStudyCircleStore().prayers;
+}
+
+function loadStudyCircleMemberships() {
+  if (isSupabaseEnabled) {
+    return cachedStudyCircleMembers.slice().sort((a, b) => new Date(b.requestedAt) - new Date(a.requestedAt));
+  }
+
+  return loadLocalStudyCircleMemberships();
+}
+
+function getStudyCircleMembershipForUser(userId) {
+  return loadStudyCircleMemberships().find((item) => item.userId === userId) || null;
 }
 
 function findUserByEmail(email) {

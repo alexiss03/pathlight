@@ -42,9 +42,11 @@ function sendFile(res, filePath) {
 }
 
 function sendRuntimeConfig(res) {
+  const config = {};
+  if (runtimeConfig.supabaseUrl) config.url = runtimeConfig.supabaseUrl;
+  if (runtimeConfig.supabaseAnonKey) config.anonKey = runtimeConfig.supabaseAnonKey;
   const payload = `window.PATHLIGHT_SUPABASE_CONFIG = Object.assign({}, window.PATHLIGHT_SUPABASE_CONFIG || {}, ${JSON.stringify({
-    url: runtimeConfig.supabaseUrl,
-    anonKey: runtimeConfig.supabaseAnonKey
+    ...config
   })});`;
 
   res.writeHead(200, {
@@ -63,6 +65,12 @@ const server = http.createServer((req, res) => {
   }
 
   const requestPath = requestUrl.pathname === "/" ? "/index.html" : requestUrl.pathname;
+  const publicFiles = new Set(["/index.html", "/admin.html", "/admin-login.html", "/styles.css", "/app.js", "/supabase-config.js"]);
+  if (!publicFiles.has(requestPath)) {
+    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Not found");
+    return;
+  }
   const safePath = path.normalize(requestPath).replace(/^\.\.(?:\\|\/|$)+/, "");
   const filePath = path.join(root, safePath);
 

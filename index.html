@@ -41,7 +41,6 @@
         <label for="loginPassword" class="label">Password</label>
         <input id="loginPassword" type="password" required minlength="6" placeholder="Enter your password" />
         <button class="btn" type="submit">Log In</button>
-        <a class="small-btn" href="admin-login.html">Admin Login</a>
       </form>
 
       <form id="signupForm" class="stack is-hidden">
@@ -69,6 +68,7 @@
             <p class="eyebrow">Pathlight Bible Study</p>
             <div class="top-links">
               <button class="quick-link is-active" type="button" data-quick-nav="dashboard">Dashboard</button>
+              <button class="quick-link" type="button" data-quick-nav="circle">Study Circle</button>
               <button class="quick-link" type="button" data-quick-nav="bible">Read</button>
               <button class="quick-link" type="button" data-quick-nav="notes">Journal</button>
               <button class="quick-link" type="button" data-quick-nav="prayer">Prayer</button>
@@ -107,6 +107,7 @@
 
         <nav class="tabs reveal" aria-label="Bible study sections">
           <button class="tab is-active" data-tab="dashboard">Dashboard</button>
+          <button class="tab" data-tab="circle">Study Circle</button>
           <button class="tab" data-tab="plan">Reading Plan</button>
           <button class="tab" data-tab="bible">Bible</button>
           <button class="tab" data-tab="bookmarks">Bookmarks</button>
@@ -152,6 +153,61 @@
             <div class="card">
               <h3>Announcements & News</h3>
               <div id="dashboardAnnouncements" class="stack"></div>
+            </div>
+          </section>
+
+          <section id="panel-circle" class="panel reveal" data-panel>
+            <div class="card">
+              <h2>Shared Study Circle</h2>
+              <p class="meta">Join the Study Circle to read shared prayers, reflections, and encouragement from the community.</p>
+              <div id="circleSummary" class="chip-list"></div>
+              <p id="circleMembershipStatus" class="meta"></p>
+              <div id="circleAccessActions" class="entry-actions">
+                <button id="requestCircleJoinBtn" class="btn" type="button">Ask To Join Study Circle</button>
+              </div>
+              <p id="circleNotice" class="auth-message" aria-live="polite"></p>
+            </div>
+
+            <div class="grid two-up">
+              <form id="circlePostForm" class="card stack" autocomplete="off">
+                <h2>Share An Insight</h2>
+                <label for="circlePostReference" class="label">Scripture Reference</label>
+                <input id="circlePostReference" maxlength="40" placeholder="John 15:5" />
+                <label for="circlePostTitle" class="label">Title</label>
+                <input id="circlePostTitle" required maxlength="80" placeholder="What stood out in today's reading?" />
+                <label for="circlePostBody" class="label">Share with the circle</label>
+                <textarea id="circlePostBody" required rows="5" maxlength="800" placeholder="Post a short reflection, takeaway, or encouragement for the group."></textarea>
+                <button id="circlePostSubmit" class="btn" type="submit">Share To Circle</button>
+              </form>
+
+              <form id="circlePrayerForm" class="card stack" autocomplete="off">
+                <h2>Share A Prayer Request</h2>
+                <label for="circlePrayerCategory" class="label">Category</label>
+                <select id="circlePrayerCategory">
+                  <option value="Personal">Personal</option>
+                  <option value="Family">Family</option>
+                  <option value="Church">Church</option>
+                  <option value="Work">Work</option>
+                  <option value="Health">Health</option>
+                </select>
+                <label for="circlePrayerText" class="label">Prayer Request</label>
+                <textarea id="circlePrayerText" required rows="5" maxlength="600" placeholder="Share a request the circle can lift up in prayer."></textarea>
+                <button id="circlePrayerSubmit" class="btn" type="submit">Post Prayer Request</button>
+              </form>
+            </div>
+
+            <div class="grid two-up">
+              <div class="card">
+                <h2>Circle Feed</h2>
+                <p class="meta">Recent reflections and Scripture insights from the community.</p>
+                <div id="circleFeedList" class="stack"></div>
+              </div>
+
+              <div class="card">
+                <h2>Prayer Wall</h2>
+                <p class="meta">Pray through requests together and mark answered prayers with care.</p>
+                <div id="circlePrayerList" class="stack"></div>
+              </div>
             </div>
           </section>
 
